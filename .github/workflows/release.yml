@@ -58,7 +58,7 @@ jobs:
           projectPath: desktop
           tagName: ${{ github.ref_name }}
           releaseName: 'Codex Reset Radar ${{ github.ref_name }}'
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           releaseBody: |
             ## Codex Reset Radar ${{ github.ref_name }}
