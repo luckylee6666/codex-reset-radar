@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Codex Reset Radar</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236366f1'/%3E%3Cstop offset='1' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Cg fill='none' stroke='white' stroke-width='2'%3E%3Ccircle cx='16' cy='16' r='9' opacity='.4'/%3E%3Ccircle cx='16' cy='16' r='5' opacity='.7'/%3E%3Cpath d='M16 16 L22.5 10.5'/%3E%3C/g%3E%3Ccircle cx='16' cy='16' r='1.8' fill='white'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+          <circle cx="12" cy="12" r="8.6" opacity=".38" />
+          <circle cx="12" cy="12" r="4.6" opacity=".66" />
+          <path d="M12 12 18.6 7.4" />
+          <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1>Codex Reset Radar</h1>
+        <p>
+          监控 <a id="handleLink" href="https://x.com/thsottiaux" target="_blank" rel="noreferrer">@thsottiaux</a>
+          的 Codex 限额重置公告
+        </p>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <div class="status-chip" id="statusChip">
+        <span class="dot"></span>
+        <span id="statusText">连接中…</span>
+        <span class="sep">·</span>
+        <span id="countdown">—</span>
+      </div>
+      <button class="btn ghost" id="pollBtn" title="立即抓取一次">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>
+        立即检查
+      </button>
+      <button class="btn icon" id="themeBtn" title="切换主题" aria-label="切换主题">
+        <svg class="i-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.6" /><path d="M12 3.4a8.6 8.6 0 0 1 0 17.2Z" fill="currentColor" stroke="none" /></svg>
+        <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M19.1 4.9l-1.6 1.6M6.5 17.5l-1.6 1.6" /></svg>
+        <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 14.6A8.5 8.5 0 0 1 9.4 3.8a8.5 8.5 0 1 0 10.8 10.8Z" /></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="main-col">
+      <div id="hero"></div>
+
+      <div class="stats">
+        <div class="card stat">
+          <div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 19V5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2Zm0 0a2 2 0 0 0 2 2h13" /></svg></div>
+          <div class="stat-value" id="statTotal">—</div>
+          <div class="stat-label">已收录推文 <span class="stat-sub" id="statTotalSub"></span></div>
+        </div>
+        <div class="card stat">
+          <div class="stat-icon accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2Z" /></svg></div>
+          <div class="stat-value" id="statResets">—</div>
+          <div class="stat-label">重置公告 <span class="stat-sub" id="statResetsSub"></span></div>
+        </div>
+        <div class="card stat">
+          <div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3.2 2" /></svg></div>
+          <div class="stat-value" id="statLast">—</div>
+          <div class="stat-label">最近检查 <span class="stat-sub" id="statLastSub"></span></div>
+        </div>
+        <div class="card stat">
+          <div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9" /><path d="M12 7v5l3 2" /><path d="M18.5 3.5 21 6l-2.5 2.5" /></svg></div>
+          <div class="stat-value" id="statNext">—</div>
+          <div class="stat-label">下次检查 <span class="stat-sub" id="statNextSub"></span></div>
+        </div>
+      </div>
+
+      <div class="card feed-panel">
+        <div class="feed-head">
+          <div class="feed-title">推文时间线 <span class="count" id="feedCount"></span></div>
+          <div class="feed-tools">
+            <div class="chips" id="feedFilters">
+              <button class="chip active" data-filter="all">全部</button>
+              <button class="chip" data-filter="reset">仅重置</button>
+              <button class="chip" data-filter="media">带媒体</button>
+            </div>
+            <label class="search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.4-3.4" /></svg>
+              <input id="searchInput" type="search" placeholder="搜索推文内容…" autocomplete="off" />
+            </label>
+          </div>
+        </div>
+        <div id="feed" class="feed">
+          <div class="skeleton-row"><div class="sk-avatar"></div><div class="sk-lines"><div class="sk-line w60"></div><div class="sk-line w90"></div><div class="sk-line w40"></div></div></div>
+          <div class="skeleton-row"><div class="sk-avatar"></div><div class="sk-lines"><div class="sk-line w50"></div><div class="sk-line w80"></div></div></div>
+          <div class="skeleton-row"><div class="sk-avatar"></div><div class="sk-lines"><div class="sk-line w70"></div><div class="sk-line w30"></div></div></div>
+        </div>
+        <div class="feed-foot">
+          <button class="btn ghost" id="loadMore" hidden>加载更早的推文</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="side-col">
+      <div class="card">
+        <div class="card-head">
+          <span>警报历史</span>
+          <span class="card-head-note" id="alertsNote"></span>
+        </div>
+        <div id="alerts" class="alerts"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><span>监控设置</span></div>
+        <div id="settings" class="settings"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><span>检测规则</span></div>
+        <div id="rulesView" class="rules"></div>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="/platform.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
