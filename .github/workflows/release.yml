@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            target: universal-apple-darwin
+            label: macOS (Universal)
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: Windows (x64)
+    runs-on: ${{ matrix.runner }}
+    name: Build ${{ matrix.label }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.runner == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install dependencies
+        working-directory: desktop
+        run: pnpm install
+
+      - name: Build and upload to release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Codex Reset Radar ${{ github.ref_name }}'
+          releaseDraft: true
+          prerelease: false
+          releaseBody: |
+            ## Codex Reset Radar ${{ github.ref_name }}
+
+            监控 [@thsottiaux](https://x.com/thsottiaux) 的 Codex 限额重置公告：他宣布重置用量额度时，立刻收到系统通知。
+
+            ### 功能
+            - 多源抓取：X 时间线 + 搜索引擎发现 + 单推接口（应对限流与快照滞后）
+            - 判定流水线：规则引擎 + AI 判定（claude / codex / ollama CLI 或 OpenAI / Anthropic 兼容 HTTP 接口）
+            - 图片 OCR：截图类公告使用 macOS Vision 识别（仅 macOS，需 Xcode Command Line Tools）
+            - macOS 系统通知、菜单栏托盘、关窗常驻、开机自启
+
+            ### 安装
+            - **macOS**：下载 `.dmg`；应用未签名，首次打开请 **右键 → 打开**
+            - **Windows**：下载 `.msi` 或 `.exe` 安装包；未签名，SmartScreen 提示时选择"仍要运行"
+
+            ### 已知限制
+            - Windows 版未经实机验证（欢迎反馈）；图片 OCR 仅 macOS 可用
+            - X 免鉴权接口可能限流，程序自动指数退避重试
+            - 本项目为个人工具，与 OpenAI 无关
+          args: --target ${{ matrix.target }}
