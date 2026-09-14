@@ -289,6 +289,7 @@ export class Poller extends EventEmitter {
     const engines = await listAvailableEngines({
       httpUrl: this.#config.aiHttpUrl,
       httpModel: this.#config.aiHttpModel,
+      engine: this.#config.aiEngine,
     });
     this.status.aiEngines = engines;
     if (!engines.length) return 0;

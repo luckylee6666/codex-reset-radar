@@ -137,6 +137,7 @@ export function createServer({ store, poller, config }) {
       const engines = await listAvailableEngines({
         httpUrl: config.aiHttpUrl,
         httpModel: config.aiHttpModel,
+        engine: config.aiEngine,
       });
       return json(res, 200, {
         config: { ...config, aiHttpKey: '' },

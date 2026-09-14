@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -53,28 +54,49 @@ export function isHttpConfigured(options = {}) {
   return Boolean(options.httpUrl && options.httpModel);
 }
 
-async function listCliEngines() {
-  if (availability.engines && Date.now() - availability.checkedAt < ENGINE_CHECK_TTL) {
-    return availability.engines;
-  }
-  const found = [];
-  for (const def of ENGINE_DEFS) {
-    try {
-      await run(resolveBin(def), def.id === 'ollama' ? ['list'] : ['--version'], { timeout: 8000 });
-      found.push(def.id);
-    } catch {
-      /* not available */
+/** ollama 的 CLI 是客户端，执行任何命令都会拉起本地服务；
+ *  这里只用 TCP 探活（无副作用），避免"探测即启动" */
+export function ollamaRunning(timeoutMs = 400) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port: 11434 });
+    const finish = (ok) => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
+  });
+}
+
+async function listCliEngines(options = {}) {
+  if (!availability.engines || Date.now() - availability.checkedAt >= ENGINE_CHECK_TTL) {
+    const found = [];
+    for (const def of ENGINE_DEFS) {
+      if (def.id === 'ollama') continue;
+      try {
+        await run(resolveBin(def), ['--version'], { timeout: 8000 });
+        found.push(def.id);
+      } catch {
+        /* not available */
+      }
     }
+    availability.engines = found;
+    availability.checkedAt = Date.now();
   }
-  availability.engines = found;
-  availability.checkedAt = Date.now();
-  return found;
+
+  const engines = [...availability.engines];
+  if (options.engine === 'ollama' || (await ollamaRunning())) {
+    engines.push('ollama');
+  }
+  return engines;
 }
 
 export async function listAvailableEngines(options = {}) {
   const engines = [];
   if (isHttpConfigured(options)) engines.push('http');
-  engines.push(...(await listCliEngines()));
+  engines.push(...(await listCliEngines(options)));
   return engines;
 }
 
@@ -178,7 +200,12 @@ export async function judgeTweet(text, options = {}) {
   const { engine = 'auto', timeoutSec = 90, ollamaModel = '' } = options;
   const order =
     engine === 'auto'
-      ? [...(isHttpConfigured(options) ? ['http'] : []), ...ENGINE_DEFS.map((e) => e.id)]
+      ? [
+          ...(isHttpConfigured(options) ? ['http'] : []),
+          'claude',
+          'codex',
+          ...((await ollamaRunning()) ? ['ollama'] : []),
+        ]
       : [engine];
   const prompt = buildPrompt(text);
   const errors = [];

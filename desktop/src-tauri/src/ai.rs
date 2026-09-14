@@ -91,33 +91,39 @@ fn resolve_bin(id: &str) -> String {
     id.to_string()
 }
 
+/// ollama 的 CLI 是客户端，执行任何命令都会拉起本地服务；
+/// 这里只用 TCP 探活（无副作用），避免"探测即启动"
+pub async fn ollama_running() -> bool {
+    tokio::time::timeout(
+        Duration::from_millis(400),
+        tokio::net::TcpStream::connect(("127.0.0.1", 11434)),
+    )
+    .await
+    .map(|result| result.is_ok())
+    .unwrap_or(false)
+}
+
 pub async fn list_available_engines(options: &AiOptions) -> Vec<String> {
     let mut found = Vec::new();
     if options.http_configured() {
         found.push("http".to_string());
     }
     for (id, _, _) in ENGINE_DEFS {
+        if id == "ollama" {
+            if options.engine == "ollama" || ollama_running().await {
+                found.push("ollama".to_string());
+            }
+            continue;
+        }
         let bin = resolve_bin(id);
-        let args: Vec<&str> = if id == "ollama" {
-            vec!["list"]
-        } else {
-            vec!["--version"]
-        };
         let run = Command::new(&bin)
-            .args(&args)
+            .arg("--version")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output();
         if let Ok(Ok(output)) = tokio::time::timeout(Duration::from_secs(8), run).await {
-            let text = format!(
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let healthy = output.status.success()
-                && !(id == "ollama" && text.contains("could not connect"));
-            if healthy {
+            if output.status.success() {
                 found.push(id.to_string());
             }
         }
@@ -267,7 +273,11 @@ pub async fn judge_tweet(
         if options.http_configured() {
             list.push("http".into());
         }
-        list.extend(["claude", "codex", "ollama"].iter().map(|s| s.to_string()));
+        list.push("claude".into());
+        list.push("codex".into());
+        if ollama_running().await {
+            list.push("ollama".into());
+        }
         list
     } else {
         vec![options.engine.clone()]
