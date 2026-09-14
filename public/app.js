@@ -514,15 +514,19 @@ function renderSettings() {
       <div class="setting-label">X 登录 Cookie<span class="setting-hint">${
         state.xCookieSet
           ? '已配置 · 用浏览器 Cookie 走 X 内部接口，数据最全最实时'
-          : '推荐用下面的按钮一键登录获取；也可手动粘贴 auth_token + ct0'
+          : '两种方式：应用内登录（邮箱/手机号），或从浏览器导入'
       }</span></div>
       ${
         Platform.kind === 'tauri'
           ? '<button class="btn primary" data-action="x-login" style="margin-bottom:8px">登录 X 自动获取</button>'
           : ''
       }
-      <input class="input mono" id="xAuthToken" type="password" value="${state.xCookieSet ? MASK : ''}" data-masked="${state.xCookieSet ? 'true' : 'false'}" placeholder="auth_token（手动粘贴，可选）" autocomplete="off" />
-      <input class="input mono" id="xCt0" type="password" value="${state.xCookieSet ? MASK : ''}" data-masked="${state.xCookieSet ? 'true' : 'false'}" placeholder="ct0（手动粘贴，可选）" autocomplete="off" style="margin-top:6px" />
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <button class="btn ghost" data-action="paste-cookie">从剪贴板导入</button>
+      </div>
+      <input class="input mono" id="xAuthToken" type="password" value="${state.xCookieSet ? MASK : ''}" data-masked="${state.xCookieSet ? 'true' : 'false'}" placeholder="auth_token（整段粘贴 cURL 也可，会自动拆分）" autocomplete="off" />
+      <input class="input mono" id="xCt0" type="password" value="${state.xCookieSet ? MASK : ''}" data-masked="${state.xCookieSet ? 'true' : 'false'}" placeholder="ct0" autocomplete="off" style="margin-top:6px" />
+      <div class="setting-hint" id="cookieHint" style="margin-top:6px"></div>
     </div>
 
     <div class="setting-actions">
@@ -578,6 +582,21 @@ function renderSettings() {
     </div>`;
 }
 
+/** 从 cURL / Cookie 字符串 / 请求头里提取 X 登录态（免去逐个找值） */
+function parseXTokens(input) {
+  const text = String(input ?? '');
+  const find = (name) => {
+    const match = text.match(new RegExp(`${name}=([^;'"\\s\\\\]+)`, 'i'));
+    if (!match) return '';
+    try {
+      return decodeURIComponent(match[1]);
+    } catch {
+      return match[1];
+    }
+  };
+  return { authToken: find('auth_token'), ct0: find('ct0') };
+}
+
 function collectSettings() {
   const settings = $('#settings');
   const intervalBtn = $('.segmented[data-field="intervalSec"] button.active', settings);
@@ -605,10 +624,14 @@ function collectSettings() {
   };
   const key = $('#aiHttpKey')?.value?.trim();
   if (key && $('#aiHttpKey').dataset.masked !== 'true') patch.aiHttpKey = key;
-  const authToken = $('#xAuthToken')?.value?.trim();
-  if (authToken && $('#xAuthToken').dataset.masked !== 'true') patch.xAuthToken = authToken;
-  const ct0 = $('#xCt0')?.value?.trim();
-  if (ct0 && $('#xCt0').dataset.masked !== 'true') patch.xCt0 = ct0;
+  const authInput = $('#xAuthToken');
+  if (authInput && authInput.dataset.masked !== 'true' && authInput.value.trim()) {
+    patch.xAuthToken = authInput.value.trim();
+  }
+  const ct0Input = $('#xCt0');
+  if (ct0Input && ct0Input.dataset.masked !== 'true' && ct0Input.value.trim()) {
+    patch.xCt0 = ct0Input.value.trim();
+  }
   return patch;
 }
 
@@ -730,16 +753,57 @@ async function testNotify() {
   showToast({ tone: 'info', title: '已发送测试通知', text: '看看屏幕右上角有没有弹出通知。' });
 }
 
+/** 把粘贴内容解析出的两个值填进输入框，并给出即时反馈 */
+function applyCookieText(text) {
+  const { authToken, ct0 } = parseXTokens(text);
+  const authInput = $('#xAuthToken');
+  const ct0Input = $('#xCt0');
+  const hint = $('#cookieHint');
+  if (!authInput || !ct0Input || !hint) return false;
+  if (authToken && ct0) {
+    authInput.value = authToken;
+    authInput.dataset.masked = 'false';
+    ct0Input.value = ct0;
+    ct0Input.dataset.masked = 'false';
+    hint.textContent = `已识别 auth_token（${authToken.length} 字符）+ ct0（${ct0.length} 字符）→ 点「保存设置」生效`;
+    hint.style.color = 'var(--ok)';
+    return true;
+  }
+  hint.textContent = authToken
+    ? '只识别到 auth_token，还缺 ct0'
+    : '未识别到 Cookie（内容需包含 auth_token 和 ct0）';
+  hint.style.color = 'var(--bad)';
+  return false;
+}
+
+async function pasteCookieFromClipboard() {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (!text?.trim()) {
+      showToast({ tone: 'info', title: '剪贴板是空的', text: '先在浏览器里 DevTools → 任意 x.com 请求 → 右键 Copy as cURL' });
+      return;
+    }
+    if (applyCookieText(text)) {
+      showToast({ tone: 'info', title: '已从剪贴板提取 Cookie', text: '点「保存设置」生效' });
+    } else {
+      showToast({ tone: 'error', title: '没识别到完整 Cookie', text: '请确认复制的是 Copy as cURL 的完整内容' });
+    }
+  } catch {
+    showToast({ tone: 'info', title: '无法直接读剪贴板', text: '请手动粘贴到 auth_token 输入框（会自动拆分）' });
+  }
+}
+
 async function xLogin() {
   const result = await Platform.xLogin();
   if (result?.unsupported) {
-    showToast({ tone: 'info', title: '仅桌面应用支持', text: '浏览器模式请手动粘贴 Cookie，或在桌面应用中一键登录。' });
+    showToast({ tone: 'info', title: '仅桌面应用支持', text: '浏览器模式请用「从剪贴板导入」。' });
   } else if (result?.ok) {
     showToast({ tone: 'info', title: '已打开 X 登录窗口', text: '用邮箱/手机号登录，完成后窗口会自动关闭并保存 Cookie。' });
   } else {
     showToast({ tone: 'error', title: '打开登录窗口失败', text: result?.error ?? '未知错误' });
   }
 }
+
 
 async function exportData() {
   const result = await Platform.exportData();
@@ -844,6 +908,19 @@ function bindEvents() {
     }
   });
 
+  // 往 auth_token / ct0 输入框里整段粘贴 cURL 时，自动拆分填入
+  $('#settings').addEventListener('input', (event) => {
+    const input = event.target;
+    if (!input || (input.id !== 'xAuthToken' && input.id !== 'xCt0')) return;
+    const value = input.value ?? '';
+    if (value.includes('auth_token=') && value.includes('ct0=')) {
+      input.dataset.masked = 'false';
+      if (applyCookieText(value)) {
+        showToast({ tone: 'info', title: '已从粘贴内容自动提取 Cookie', text: '点「保存设置」生效' });
+      }
+    }
+  });
+
   $('#settings').addEventListener('click', async (event) => {
     const switchEl = event.target.closest('.switch');
     if (switchEl) {
@@ -890,6 +967,7 @@ function bindEvents() {
     else if (action === 'export') exportData();
     else if (action === 'test-ai') testAi();
     else if (action === 'x-login') xLogin();
+    else if (action === 'paste-cookie') pasteCookieFromClipboard();
   });
 
   $('#hero').addEventListener('click', async (event) => {

@@ -231,13 +231,11 @@ pub async fn open_x_login(app: AppHandle) -> Value {
         "x-login",
         WebviewUrl::External("https://x.com/login".parse().unwrap()),
     )
-    .title("登录 X —— 若 Google/Apple 登录无反应，请改用「Continue with phone」或邮箱登录")
+    .title("登录 X —— 请用「Continue with phone」或邮箱登录（Google/Apple 弹窗在应用内不可用）")
     .inner_size(960.0, 720.0)
     .on_new_window(move |url, features| {
-        // 放行 OAuth 弹窗（Continue with Google / Apple 等）。
-        // 注意：在回调里建窗口若失败可能 panic，这里捕获后降级为拒绝，避免整个应用崩溃。
+        // 放行第三方弹窗；捕获建窗 panic（release 是 unwind，避免整机崩溃），失败则拒绝
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            // 先清理上一次取消/残留的弹窗，避免状态卡死
             for (label, window) in app_for_popup.webview_windows() {
                 if label.starts_with("x-login-popup-") {
                     let _ = window.close();
