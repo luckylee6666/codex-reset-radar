@@ -243,6 +243,43 @@ export async function fetchTweetWithRelated(id, handle) {
   return { tweet, related };
 }
 
+/* ── 公开主页抓 ID（免登录，本环境可拿实时数据） ────────── */
+
+export function extractProfileIds(html, maxAgeDays = 30) {
+  const ids = new Set();
+  for (const match of html.matchAll(/rest_id:"(\d{15,20})"/g)) ids.add(match[1]);
+  for (const match of html.matchAll(/status\/(\d{15,20})/g)) ids.add(match[1]);
+
+  const now = Date.now();
+  const cutoff = now - maxAgeDays * 24 * 3600 * 1000;
+  return [...ids]
+    .map((id) => ({ id, ts: Number((BigInt(id) >> 22n) + 1288834974657n) }))
+    .filter((item) => item.ts > cutoff && item.ts < now + 3600 * 1000)
+    .sort((a, b) => b.ts - a.ts)
+    .map((item) => item.id);
+}
+
+export function extractProfileUserId(html) {
+  const match = html.match(/__typename:"User",rest_id:"(\d{15,20})"/);
+  return match ? match[1] : '';
+}
+
+export async function fetchProfile(handle) {
+  const url = `https://x.com/${encodeURIComponent(handle)}?t=${Date.now()}`;
+  const res = await fetch(url, {
+    headers: { 'user-agent': UA, accept: 'text/html' },
+    signal: AbortSignal.timeout(15000),
+    redirect: 'follow',
+  });
+  if (!res.ok) throw new Error(`主页 HTTP ${res.status}`);
+  const html = await res.text();
+  return { tweetIds: extractProfileIds(html), userId: extractProfileUserId(html) };
+}
+
+export async function fetchProfileIds(handle) {
+  return (await fetchProfile(handle)).tweetIds;
+}
+
 /* ── 搜索发现：时间线接口滞后 / 限流时，用搜索引擎找最新推文 ID ── */
 
 export function extractStatusIds(text, handle) {

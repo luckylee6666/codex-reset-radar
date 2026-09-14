@@ -1,5 +1,12 @@
 import { EventEmitter } from 'node:events';
-import { fetchTimeline, fetchFromRss, discoverTweetIds, fetchTweetWithRelated } from './fetch.js';
+import {
+  fetchTimeline,
+  fetchFromRss,
+  fetchProfile,
+  discoverTweetIds,
+  fetchTweetWithRelated,
+} from './fetch.js';
+import { isGraphqlConfigured, fetchUserTweetsGraphql, resolveUserIdGraphql } from './x-graphql.js';
 import { detectReset } from './detect.js';
 import { judgeTweet, listAvailableEngines } from './ai.js';
 import { runOcrPass, combinedText } from './ocr.js';
@@ -31,6 +38,7 @@ export class Poller extends EventEmitter {
   #lastTimelineOkAt = 0;
   #lastDiscoveryAt = 0;
   #lastDiscoveryOkAt = 0;
+  #nextProfileAt = 0;
 
   constructor({ config, store, fetchImpl = null }) {
     super();
@@ -81,7 +89,7 @@ export class Poller extends EventEmitter {
     }
   }
 
-  async #collectTweets() {
+  async #collectTweets(forceDiscovery = false) {
     if (this.#fetchImpl) return this.#fetchTimeline();
 
     const merged = new Map();
@@ -112,54 +120,124 @@ export class Poller extends EventEmitter {
       }
     }
 
-    /* 搜索发现：按自己的间隔运行，和时间线退避无关 */
+    /* 公开主页：免登录，拿最近推文 ID + 账号数字 ID */
+    let directIds = [];
+    let profileUserId = '';
+    if (this.#config.profileScrape !== false && Date.now() >= this.#nextProfileAt) {
+      try {
+        const profile = await fetchProfile(this.#config.handle);
+        directIds = profile.tweetIds;
+        profileUserId = profile.userId;
+        this.#nextProfileAt = 0;
+        if (directIds.length) {
+          this.status.profileIds = directIds.length;
+          sources.push('profile');
+        }
+      } catch {
+        this.#nextProfileAt = Date.now() + 10 * 60 * 1000;
+      }
+    }
+    if (!profileUserId) profileUserId = this.#store.getMeta('xUserId') ?? '';
+    else if (this.#store.getMeta('xUserId') !== profileUserId) {
+      this.#store.setMeta('xUserId', profileUserId);
+    }
+
+    /* 浏览器 Cookie + 内部 GraphQL：配置了就优先，数据最全 */
+    let graphqlOk = false;
+    let graphqlError = null;
+    if (isGraphqlConfigured(this.#config)) {
+      try {
+        let userId = profileUserId || this.#store.getMeta('xUserId') || '';
+        if (!userId) userId = await resolveUserIdGraphql(this.#config, this.#config.handle);
+        if (userId) {
+          this.#store.setMeta('xUserId', userId);
+          const tweets = await fetchUserTweetsGraphql(this.#config, userId);
+          for (const tweet of tweets) merged.set(tweet.id, tweet);
+          sources.push('graphql');
+          graphqlOk = true;
+          this.status.graphqlTweets = tweets.length;
+          this.#store.setMeta('graphqlOk', { at: Date.now(), count: tweets.length });
+        }
+      } catch (err) {
+        graphqlError = err?.message ?? String(err);
+        this.emit('graphql-error', graphqlError);
+      }
+    }
+
+    /* 搜索发现：按自己的间隔运行，和时间线退避无关；手动检查时强制执行 */
+    let discoveredIds = [];
     if (this.#config.searchDiscovery !== false) {
-      if (Date.now() - this.#lastDiscoveryAt >= discoveryIntervalMs) {
+      if (forceDiscovery || Date.now() - this.#lastDiscoveryAt >= discoveryIntervalMs) {
         this.#lastDiscoveryAt = Date.now();
         const { ids, source, attempted } = await discoverTweetIds(this.#config.handle);
         discoveryAttempted = attempted;
+        discoveredIds = ids;
         if (source) {
           discoveryOk = true;
           this.#lastDiscoveryOkAt = Date.now();
           sources.push(source);
         }
-
-        const unseen = ids.filter((id) => !this.#store.hasTweet(id) && !merged.has(id));
-        const limit = Math.max(1, Math.min(30, Number(this.#config.discoveryMaxFetch) || 10));
-        let fetched = 0;
-        for (const id of unseen.slice(0, limit)) {
-          try {
-            const { tweet, related } = await fetchTweetWithRelated(id, this.#config.handle);
-            merged.set(tweet.id, tweet);
-            fetched += 1;
-            for (const parent of related) {
-              if (!this.#store.hasTweet(parent.id) && !merged.has(parent.id)) {
-                merged.set(parent.id, parent);
-              }
-            }
-          } catch {
-            // 单推可能已删除或接口失败，跳过
-          }
-          await sleep(350);
-        }
-        this.status.discoveredIds = ids.length;
-        this.status.discoveryFetched = fetched;
+      } else if (Date.now() - this.#lastDiscoveryOkAt < 3 * discoveryIntervalMs) {
+        discoveryOk = this.#lastDiscoveryOkAt > 0;
       }
+    }
+
+    /* 合并 ID（主页在前），拉取未见过的详情 */
+    {
+      const mergedIds = [...new Set([...directIds, ...discoveredIds])];
+      const unseen = mergedIds.filter(
+        (id) => !this.#store.hasTweet(id) && !merged.has(id),
+      );
+      const limit = Math.max(1, Math.min(30, Number(this.#config.discoveryMaxFetch) || 10));
+      let fetched = 0;
+      for (const id of unseen.slice(0, limit)) {
+        try {
+          const { tweet, related } = await fetchTweetWithRelated(id, this.#config.handle);
+          const handle = String(this.#config.handle).toLowerCase();
+          const author = String(tweet.authorHandle || '').toLowerCase();
+          if (author && author !== handle) continue; // 主页可能混入他人推文，按作者过滤
+          merged.set(tweet.id, tweet);
+          fetched += 1;
+          for (const parent of related) {
+            const parentAuthor = String(parent.authorHandle || '').toLowerCase();
+            if (parentAuthor && parentAuthor !== handle) continue;
+            if (!this.#store.hasTweet(parent.id) && !merged.has(parent.id)) {
+              merged.set(parent.id, parent);
+            }
+          }
+        } catch {
+          // 单推可能已删除或接口失败，跳过
+        }
+        await sleep(350);
+      }
+      this.status.discoveredIds = Math.max(directIds.length, discoveredIds.length);
+      this.status.discoveryFetched = fetched;
     }
 
     const timelineFresh = Date.now() - this.#lastTimelineOkAt < 3 * intervalMs;
     const discoveryFresh = Date.now() - this.#lastDiscoveryOkAt < 3 * discoveryIntervalMs;
-    const anySourceHealthy = timelineOk || timelineFresh || discoveryOk || discoveryFresh;
+    const anySourceHealthy =
+      timelineOk ||
+      timelineFresh ||
+      discoveryOk ||
+      discoveryFresh ||
+      graphqlOk ||
+      directIds.length > 0;
 
     if (!merged.size && !anySourceHealthy) {
       const message =
         timelineFailure ??
+        graphqlError ??
         (discoveryAttempted ? '搜索发现暂时不可用' : '所有数据源暂时不可用');
       throw new Error(message);
     }
 
     if (sources.length) this.status.lastSource = sources.join('+');
-    this.status.lastError = timelineOk || discoveryOk ? null : timelineFailure;
+    this.status.lastError = graphqlError
+      ? graphqlError
+      : timelineOk || discoveryOk || graphqlOk
+        ? null
+        : timelineFailure;
     return [...merged.values()].sort((a, b) => a.createdTs - b.createdTs);
   }
 
@@ -200,7 +278,7 @@ export class Poller extends EventEmitter {
     const started = Date.now();
 
     try {
-      const tweets = await this.#collectTweets();
+      const tweets = await this.#collectTweets(trigger === 'manual');
       const result = await this.ingest(tweets, { source: 'live' });
       const ocrApplied = await this.#ocrPass();
       const aiJudged = await this.#judgeWithAi();

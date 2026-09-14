@@ -24,6 +24,7 @@ pub struct Status {
     pub ai_judged: usize,
     pub ai_engines: Option<Vec<String>>,
     pub ocr_applied: usize,
+    pub graphql_tweets: usize,
 }
 
 impl Status {
@@ -43,6 +44,7 @@ impl Status {
             ai_judged: 0,
             ai_engines: None,
             ocr_applied: 0,
+            graphql_tweets: 0,
         }
     }
 }
@@ -182,10 +184,92 @@ pub async fn poll_once(app: &AppHandle, trigger: &str) -> PollResult {
         }
     }
 
-    /* ── 搜索发现：按自己的节奏运行 ── */
+    /* ── 公开主页：免登录，拿最近推文 ID + 账号数字 ID（失败冷却 10 分钟） ── */
+    let mut direct_ids: Vec<String> = Vec::new();
+    let mut profile_user_id = String::new();
+    {
+        let due = {
+            let discovery = state.discovery_state.lock().unwrap();
+            now_ms() >= discovery.next_profile_at
+        };
+        if config.profile_scrape && due {
+            match crate::fetch::fetch_profile(&state.client, &config.handle).await {
+                Ok((ids, user_id)) => {
+                    if !ids.is_empty() {
+                        sources.push("profile".into());
+                    }
+                    direct_ids = ids;
+                    profile_user_id = user_id;
+                }
+                Err(_) => {
+                    let mut discovery = state.discovery_state.lock().unwrap();
+                    discovery.next_profile_at = now_ms() + 10 * 60 * 1000;
+                }
+            }
+        }
+    }
+    {
+        let cached = state.store.lock().unwrap().get_meta("xUserId");
+        if profile_user_id.is_empty() {
+            profile_user_id = cached
+                .as_ref()
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+        } else if cached.as_ref().and_then(|v| v.as_str()) != Some(profile_user_id.as_str()) {
+            let mut store = state.store.lock().unwrap();
+            let _ = store.set_meta("xUserId", &json!(profile_user_id));
+        }
+    }
+
+    /* ── 浏览器 Cookie + 内部 GraphQL：配置了就优先，数据最全 ── */
+    let mut graphql_ok = false;
+    let mut graphql_error: Option<String> = None;
+    if crate::x_graphql::is_configured(&config) {
+        let mut user_id = profile_user_id.clone();
+        if user_id.is_empty() {
+            match crate::x_graphql::resolve_user_id(&state.client, &config, &config.handle).await {
+                Ok(id) => user_id = id,
+                Err(err) => graphql_error = Some(err),
+            }
+        }
+        if graphql_error.is_none() && !user_id.is_empty() {
+            {
+                let mut store = state.store.lock().unwrap();
+                let _ = store.set_meta("xUserId", &json!(user_id));
+            }
+            match crate::x_graphql::fetch_user_tweets(&state.client, &config, &user_id).await {
+                Ok(tweets) => {
+                    let count = tweets.len();
+                    for tweet in tweets {
+                        merged.insert(tweet.id.clone(), tweet);
+                    }
+                    sources.push("graphql".into());
+                    graphql_ok = true;
+                    {
+                        let mut status = state.status.lock().unwrap();
+                        status.graphql_tweets = count;
+                    }
+                    let mut store = state.store.lock().unwrap();
+                    let _ = store.set_meta(
+                        "graphqlOk",
+                        &json!({ "at": now_ms(), "count": count }),
+                    );
+                }
+                Err(err) => graphql_error = Some(err),
+            }
+        }
+        if let Some(err) = &graphql_error {
+            let _ = app.emit("graphql-error", err);
+        }
+    }
+
+    /* ── 搜索发现：按自己的节奏运行；手动/托盘触发时强制执行 ── */
     let mut discovery_ok = false;
     let mut discovery_attempted = false;
-    let discovery_due = {
+    let mut discovered_ids: Vec<String> = Vec::new();
+    let force_discovery = trigger == "manual" || trigger == "tray";
+    let discovery_due = force_discovery || {
         let discovery = state.discovery_state.lock().unwrap();
         now_ms() - discovery.last_at >= discovery_interval_ms
     };
@@ -197,29 +281,54 @@ pub async fn poll_once(app: &AppHandle, trigger: &str) -> PollResult {
 
         let (ids, source, attempted) = state.discovery.discover(&state.client, &config.handle).await;
         discovery_attempted = attempted;
+        discovered_ids = ids;
         if let Some(source) = source {
             discovery_ok = true;
             sources.push(source);
             let mut discovery = state.discovery_state.lock().unwrap();
             discovery.last_ok_at = now_ms();
         }
+    } else if config.search_discovery {
+        let last_ok = {
+            let discovery = state.discovery_state.lock().unwrap();
+            discovery.last_ok_at
+        };
+        discovery_ok = last_ok > 0 && now_ms() - last_ok < 3 * discovery_interval_ms;
+    }
 
-        let discovered_count = ids.len();
+    /* ── 合并 ID（主页在前），拉取未见过的详情 ── */
+    {
+        let mut merged_ids: Vec<String> = direct_ids.clone();
+        for id in &discovered_ids {
+            if !merged_ids.contains(id) {
+                merged_ids.push(id.clone());
+            }
+        }
         let unseen: Vec<String> = {
             let store = state.store.lock().unwrap();
-            ids.into_iter()
+            merged_ids
+                .into_iter()
                 .filter(|id| !store.has_tweet(id) && !merged.contains_key(id))
                 .collect()
         };
         let limit = config.discovery_max_fetch.clamp(1, 30) as usize;
         let mut fetched = 0usize;
+        let handle = config.handle.to_lowercase();
         for id in unseen.iter().take(limit) {
             if let Ok((tweet, related)) =
                 fetch_tweet_with_related(&state.client, id, &config.handle).await
             {
+                let author = tweet.author_handle.to_lowercase();
+                if !author.is_empty() && author != handle {
+                    continue; // 主页可能混入他人推文，按作者过滤
+                }
                 merged.insert(tweet.id.clone(), tweet);
                 fetched += 1;
                 for parent in related {
+                    let parent_author = parent.author_handle.to_lowercase();
+                    if !parent_author.is_empty() && parent_author != handle {
+                        continue;
+                    }
                     let exists = state.store.lock().unwrap().has_tweet(&parent.id);
                     if !exists && !merged.contains_key(&parent.id) {
                         merged.insert(parent.id.clone(), parent);
@@ -230,7 +339,7 @@ pub async fn poll_once(app: &AppHandle, trigger: &str) -> PollResult {
         }
         {
             let mut status = state.status.lock().unwrap();
-            status.discovered_ids = discovered_count;
+            status.discovered_ids = direct_ids.len().max(discovered_ids.len());
             status.discovery_fetched = fetched;
         }
     }
@@ -246,15 +355,23 @@ pub async fn poll_once(app: &AppHandle, trigger: &str) -> PollResult {
     };
 
     if merged.is_empty()
-        && !(timeline_ok || timeline_fresh || discovery_ok || discovery_fresh)
+        && !(timeline_ok
+            || timeline_fresh
+            || discovery_ok
+            || discovery_fresh
+            || graphql_ok
+            || !direct_ids.is_empty())
     {
-        let message = timeline_failure.unwrap_or_else(|| {
-            if discovery_attempted {
-                "搜索发现暂时不可用".into()
-            } else {
-                "所有数据源暂时不可用".into()
-            }
-        });
+        let message = timeline_failure
+            .clone()
+            .or_else(|| graphql_error.clone())
+            .unwrap_or_else(|| {
+                if discovery_attempted {
+                    "搜索发现暂时不可用".into()
+                } else {
+                    "所有数据源暂时不可用".into()
+                }
+            });
         {
             let mut status = state.status.lock().unwrap();
             status.checking = false;
@@ -289,7 +406,9 @@ pub async fn poll_once(app: &AppHandle, trigger: &str) -> PollResult {
         status.last_source = Some(sources.join("+"));
         status.ai_judged = ai_judged;
         status.ocr_applied = ocr_applied;
-        if timeline_ok || discovery_ok {
+        if let Some(err) = &graphql_error {
+            status.last_error = Some(err.clone());
+        } else if timeline_ok || discovery_ok || graphql_ok {
             status.last_error = None;
         } else {
             status.last_error = timeline_failure;

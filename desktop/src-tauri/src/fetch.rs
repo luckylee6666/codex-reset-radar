@@ -78,7 +78,7 @@ pub fn decode_entities(text: &str) -> String {
     out
 }
 
-fn iso_and_ts(raw: &str) -> (String, i64) {
+pub(crate) fn iso_and_ts(raw: &str) -> (String, i64) {
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw) {
         let utc = dt.with_timezone(&chrono::Utc);
         return (
@@ -345,6 +345,66 @@ pub async fn fetch_tweet_with_related(
         }
     }
     Ok((tweet, related))
+}
+
+/* ── 公开主页抓 ID（免登录，本环境可拿实时数据） ────────── */
+
+pub fn extract_profile_ids(html: &str, max_age_days: i64) -> Vec<String> {
+    let mut set: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for caps in regex::Regex::new(r#"rest_id:"(\d{15,20})""#)
+        .unwrap()
+        .captures_iter(html)
+    {
+        set.insert(caps[1].to_string());
+    }
+    for caps in regex::Regex::new(r"status/(\d{15,20})")
+        .unwrap()
+        .captures_iter(html)
+    {
+        set.insert(caps[1].to_string());
+    }
+
+    let now = now_ms();
+    let cutoff = now - max_age_days * 24 * 3600 * 1000;
+    let mut items: Vec<(i64, String)> = set
+        .into_iter()
+        .filter_map(|id| {
+            id.parse::<u64>()
+                .ok()
+                .map(|n| (((n >> 22) as i64) + 1_288_834_974_657, id))
+        })
+        .filter(|(ts, _)| *ts > cutoff && *ts < now + 3600 * 1000)
+        .collect();
+    items.sort_by(|a, b| b.0.cmp(&a.0));
+    items.into_iter().map(|(_, id)| id).collect()
+}
+
+pub fn extract_profile_user_id(html: &str) -> String {
+    regex::Regex::new(r#"__typename:"User",rest_id:"(\d{15,20})""#)
+        .unwrap()
+        .captures(html)
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str().to_string())
+        .unwrap_or_default()
+}
+
+pub async fn fetch_profile(
+    client: &reqwest::Client,
+    handle: &str,
+) -> Result<(Vec<String>, String), String> {
+    let url = format!("https://x.com/{handle}?t={}", now_ms());
+    let res = client
+        .get(&url)
+        .header("user-agent", UA)
+        .header("accept", "text/html")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !res.status().is_success() {
+        return Err(format!("主页 HTTP {}", res.status().as_u16()));
+    }
+    let html = res.text().await.map_err(|e| e.to_string())?;
+    Ok((extract_profile_ids(&html, 30), extract_profile_user_id(&html)))
 }
 
 /* ── 搜索发现 ───────────────────────────────────────────── */

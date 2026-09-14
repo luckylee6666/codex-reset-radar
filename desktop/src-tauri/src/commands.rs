@@ -24,10 +24,13 @@ pub async fn get_state(app: AppHandle) -> Value {
     let mut config_value = serde_json::to_value(&config).unwrap_or_else(|_| json!({}));
     if let Some(object) = config_value.as_object_mut() {
         object.insert("aiHttpKey".into(), json!(""));
+        object.insert("xAuthToken".into(), json!(""));
+        object.insert("xCt0".into(), json!(""));
     }
     json!({
         "config": config_value,
         "aiHttpKeySet": !config.ai_http_key.is_empty(),
+        "xCookieSet": !config.x_auth_token.is_empty() && !config.x_ct0.is_empty(),
         "status": status,
         "stats": stats,
         "account": account,
@@ -211,6 +214,106 @@ pub async fn simulate(app: AppHandle, text: String) -> Value {
             }))
             .unwrap_or(Value::Null),
     })
+}
+
+#[tauri::command]
+pub async fn open_x_login(app: AppHandle) -> Value {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+    if let Some(existing) = app.get_webview_window("x-login") {
+        let _ = existing.set_focus();
+        return json!({ "ok": true, "existing": true });
+    }
+
+    let app_for_popup = app.clone();
+    if let Err(err) = WebviewWindowBuilder::new(
+        &app,
+        "x-login",
+        WebviewUrl::External("https://x.com/login".parse().unwrap()),
+    )
+    .title("登录 X —— 若 Google/Apple 登录无反应，请改用「Continue with phone」或邮箱登录")
+    .inner_size(960.0, 720.0)
+    .on_new_window(move |url, features| {
+        // 放行 OAuth 弹窗（Continue with Google / Apple 等）。
+        // 注意：在回调里建窗口若失败可能 panic，这里捕获后降级为拒绝，避免整个应用崩溃。
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // 先清理上一次取消/残留的弹窗，避免状态卡死
+            for (label, window) in app_for_popup.webview_windows() {
+                if label.starts_with("x-login-popup-") {
+                    let _ = window.close();
+                }
+            }
+            let label = format!("x-login-popup-{}", crate::poller::now_ms());
+            WebviewWindowBuilder::new(&app_for_popup, &label, WebviewUrl::External(url.clone()))
+                .window_features(features)
+                .inner_size(520.0, 720.0)
+                .title("登录中的第三方页面")
+                .build()
+        }));
+        match result {
+            Ok(Ok(window)) => tauri::webview::NewWindowResponse::Create { window },
+            Ok(Err(_)) | Err(_) => tauri::webview::NewWindowResponse::Deny,
+        }
+    })
+    .build()
+    {
+        return json!({ "ok": false, "error": err.to_string() });
+    }
+
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let started = std::time::Instant::now();
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let Some(window) = app_handle.get_webview_window("x-login") else {
+                return; // 用户手动关掉了窗口
+            };
+            if started.elapsed().as_secs() > 300 {
+                close_x_login_windows(&app_handle);
+                let _ = app_handle.emit("x-cookie", json!({ "ok": false, "error": "登录超时，请重试" }));
+                return;
+            }
+
+            let cookies = match window.cookies() {
+                Ok(cookies) => cookies,
+                Err(_) => continue,
+            };
+            let auth_token = cookies
+                .iter()
+                .find(|c| c.name() == "auth_token")
+                .map(|c| c.value().to_string());
+            let ct0 = cookies
+                .iter()
+                .find(|c| c.name() == "ct0")
+                .map(|c| c.value().to_string());
+
+            if let (Some(auth_token), Some(ct0)) = (auth_token, ct0) {
+                if auth_token.is_empty() || ct0.is_empty() {
+                    continue;
+                }
+                {
+                    let state = app_handle.state::<AppState>();
+                    let mut config = state.config.lock().unwrap();
+                    config.x_auth_token = auth_token;
+                    config.x_ct0 = ct0;
+                    let _ = config.save(&state.config_path);
+                }
+                close_x_login_windows(&app_handle);
+                let _ = app_handle.emit("x-cookie", json!({ "ok": true }));
+                return;
+            }
+        }
+    });
+
+    json!({ "ok": true })
+}
+
+fn close_x_login_windows(app: &AppHandle) {
+    for (label, window) in app.webview_windows() {
+        if label == "x-login" || label.starts_with("x-login-popup-") {
+            let _ = window.close();
+        }
+    }
 }
 
 #[tauri::command]

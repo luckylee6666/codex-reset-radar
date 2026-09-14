@@ -6,6 +6,7 @@ mod fetch;
 mod ocr;
 mod poller;
 mod store;
+mod x_graphql;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
@@ -20,6 +21,7 @@ pub struct TimelineState {
 pub struct DiscoveryState {
     pub last_at: i64,
     pub last_ok_at: i64,
+    pub next_profile_at: i64,
 }
 
 pub struct AppState {
@@ -123,6 +125,7 @@ pub fn run() {
             commands::test_notify,
             commands::test_ai,
             commands::open_external,
+            commands::open_x_login,
             commands::export_data,
             commands::set_autostart,
         ])
@@ -139,7 +142,7 @@ pub fn run() {
             app.manage(AppState {
                 config: Mutex::new(config),
                 store: Mutex::new(store),
-                status: Mutex::new(poller::Status::new(300)),
+                status: Mutex::new(poller::Status::new(600)),
                 running: AtomicBool::new(true),
                 trigger: tokio::sync::Notify::new(),
                 poll_lock: tokio::sync::Mutex::new(()),
@@ -156,6 +159,7 @@ pub fn run() {
                 discovery_state: Mutex::new(DiscoveryState {
                     last_at: 0,
                     last_ok_at: 0,
+                    next_profile_at: 0,
                 }),
                 config_path,
             });
@@ -200,6 +204,10 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // 只对主窗口做"关闭即隐藏"；登录窗口等允许正常关闭
+            if window.label() != "main" {
+                return;
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();

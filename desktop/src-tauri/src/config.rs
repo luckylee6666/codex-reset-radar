@@ -13,6 +13,10 @@ pub struct Config {
     pub extra_keywords: Vec<String>,
     pub rss_url: String,
     pub search_discovery: bool,
+    pub profile_scrape: bool,
+    pub x_auth_token: String,
+    pub x_ct0: String,
+    pub x_user_tweets_query_id: String,
     pub discovery_max_fetch: u32,
     pub discovery_interval_sec: u64,
     pub ai_judge: bool,
@@ -35,7 +39,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             handle: "thsottiaux".into(),
-            interval_sec: 300,
+            interval_sec: 600,
             notify: true,
             notify_sound: "Glass".into(),
             fresh_hours: 6.0,
@@ -43,6 +47,10 @@ impl Default for Config {
             extra_keywords: Vec::new(),
             rss_url: String::new(),
             search_discovery: true,
+            profile_scrape: true,
+            x_auth_token: String::new(),
+            x_ct0: String::new(),
+            x_user_tweets_query_id: String::new(),
             discovery_max_fetch: 10,
             discovery_interval_sec: 600,
             ai_judge: true,
@@ -87,7 +95,7 @@ impl Config {
 
     pub fn apply_patch(&mut self, patch: &serde_json::Value) {
         if let Some(v) = patch.get("intervalSec").and_then(|v| v.as_f64()) {
-            self.interval_sec = (v as u64).clamp(60, 3600);
+            self.interval_sec = (v as u64).clamp(600, 7200);
         }
         if let Some(v) = patch.get("notify").and_then(|v| v.as_bool()) {
             self.notify = v;
@@ -120,6 +128,32 @@ impl Config {
         }
         if let Some(v) = patch.get("searchDiscovery").and_then(|v| v.as_bool()) {
             self.search_discovery = v;
+        }
+        if let Some(v) = patch.get("profileScrape").and_then(|v| v.as_bool()) {
+            self.profile_scrape = v;
+        }
+        if let Some(value) = patch.get("xAuthToken") {
+            if value.is_null() {
+                self.x_auth_token.clear();
+            } else if let Some(token) = value.as_str() {
+                let token = token.trim();
+                if !token.is_empty() {
+                    self.x_auth_token = token.chars().take(200).collect();
+                }
+            }
+        }
+        if let Some(value) = patch.get("xCt0") {
+            if value.is_null() {
+                self.x_ct0.clear();
+            } else if let Some(token) = value.as_str() {
+                let token = token.trim();
+                if !token.is_empty() {
+                    self.x_ct0 = token.chars().take(200).collect();
+                }
+            }
+        }
+        if let Some(v) = patch.get("xUserTweetsQueryId").and_then(|v| v.as_str()) {
+            self.x_user_tweets_query_id = v.trim().chars().take(60).collect();
         }
         if let Some(v) = patch.get("discoveryMaxFetch").and_then(|v| v.as_f64()) {
             self.discovery_max_fetch = (v as u32).clamp(1, 30);

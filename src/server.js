@@ -44,7 +44,7 @@ async function readBody(req) {
 
 function sanitizeConfigPatch(patch) {
   const out = {};
-  if (patch.intervalSec !== undefined) out.intervalSec = clamp(Number(patch.intervalSec) || 90, 20, 3600);
+  if (patch.intervalSec !== undefined) out.intervalSec = clamp(Number(patch.intervalSec) || 600, 600, 7200);
   if (patch.notify !== undefined) out.notify = Boolean(patch.notify);
   if (patch.notifySound !== undefined) out.notifySound = String(patch.notifySound).slice(0, 40);
   if (patch.freshHours !== undefined) out.freshHours = clamp(Number(patch.freshHours) || 0, 0, 168);
@@ -64,6 +64,24 @@ function sanitizeConfigPatch(patch) {
   }
   if (patch.discoveryIntervalSec !== undefined) {
     out.discoveryIntervalSec = clamp(Number(patch.discoveryIntervalSec) || 300, 60, 3600);
+  }
+  if (patch.profileScrape !== undefined) out.profileScrape = Boolean(patch.profileScrape);
+  if (patch.xAuthToken !== undefined) {
+    if (patch.xAuthToken === null) out.xAuthToken = '';
+    else {
+      const token = String(patch.xAuthToken).trim();
+      if (token) out.xAuthToken = token.slice(0, 200);
+    }
+  }
+  if (patch.xCt0 !== undefined) {
+    if (patch.xCt0 === null) out.xCt0 = '';
+    else {
+      const token = String(patch.xCt0).trim();
+      if (token) out.xCt0 = token.slice(0, 200);
+    }
+  }
+  if (patch.xUserTweetsQueryId !== undefined) {
+    out.xUserTweetsQueryId = String(patch.xUserTweetsQueryId).trim().slice(0, 60);
   }
   if (patch.aiJudge !== undefined) out.aiJudge = Boolean(patch.aiJudge);
   if (patch.aiEngine !== undefined) {
@@ -140,8 +158,9 @@ export function createServer({ store, poller, config }) {
         engine: config.aiEngine,
       });
       return json(res, 200, {
-        config: { ...config, aiHttpKey: '' },
+        config: { ...config, aiHttpKey: '', xAuthToken: '', xCt0: '' },
         aiHttpKeySet: Boolean(config.aiHttpKey),
+        xCookieSet: Boolean(config.xAuthToken && config.xCt0),
         status: { ...poller.status },
         stats: store.getStats(),
         account: store.getMeta('account'),

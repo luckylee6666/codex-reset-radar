@@ -52,6 +52,7 @@
         body: JSON.stringify({ text }),
       }),
     testNotify: () => httpJson('/api/test-notify', { method: 'POST' }),
+    xLogin: async () => ({ ok: false, unsupported: true }),
     testAi: (text) =>
       httpJson('/api/test-ai', {
         method: 'POST',
@@ -99,6 +100,7 @@
     rescan: () => invoke('rescan'),
     simulate: (text) => invoke('simulate', { text }),
     testNotify: () => invoke('test_notify'),
+    xLogin: () => invoke('open_x_login'),
     testAi: (text) => invoke('test_ai', { text }),
     exportData: () => invoke('export_data'),
     openExternal: (url) => invoke('open_external', { url }),

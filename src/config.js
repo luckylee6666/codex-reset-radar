@@ -7,7 +7,7 @@ export const DATA_DIR = path.join(ROOT, 'data');
 
 export const DEFAULTS = {
   handle: 'thsottiaux',
-  intervalSec: 300,
+  intervalSec: 600,
   port: 4173,
   notify: true,
   notifySound: 'Glass',
@@ -18,6 +18,10 @@ export const DEFAULTS = {
   searchDiscovery: true,
   discoveryMaxFetch: 10,
   discoveryIntervalSec: 600,
+  profileScrape: true,
+  xAuthToken: '',
+  xCt0: '',
+  xUserTweetsQueryId: '',
   aiJudge: true,
   aiEngine: 'auto',
   aiMaxPerPoll: 3,

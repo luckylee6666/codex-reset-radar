@@ -123,6 +123,20 @@ function renderStatus() {
   tick();
 }
 
+const SOURCE_LABELS = { syndication: '时间线', profile: '公开页', graphql: 'Cookie接口', rss: 'RSS' };
+
+function sourceLabel(source) {
+  if (!source) return '';
+  return source
+    .split('+')
+    .map((part) => {
+      if (SOURCE_LABELS[part]) return SOURCE_LABELS[part];
+      if (/brave|duckduckgo|unrollnow/.test(part)) return '搜索';
+      return part;
+    })
+    .join('+');
+}
+
 function tick() {
   const status = state.status ?? {};
   const countdown = $('#countdown');
@@ -141,7 +155,11 @@ function tick() {
   const sub = $('#statNextSub');
   if (sub && state.config) sub.textContent = `每 ${state.config.intervalSec}s`;
   const lastSub = $('#statLastSub');
-  if (lastSub && status.lastCheckAt) lastSub.textContent = fmtTime(status.lastCheckAt).slice(11);
+  if (lastSub && status.lastCheckAt) {
+    const time = fmtTime(status.lastCheckAt).slice(11);
+    const source = sourceLabel(status.lastSource);
+    lastSub.textContent = source ? `${time} · ${source}` : time;
+  }
   const statLast = $('#statLast');
   if (statLast) statLast.textContent = status.lastCheckAt ? fmtAgo(status.lastCheckAt) : '—';
 }
@@ -358,12 +376,14 @@ async function loadAlerts() {
 /* ── 设置 ──────────────────────────────────────────────── */
 
 const INTERVALS = [
-  [180, '3m'],
-  [300, '5m'],
   [600, '10m'],
   [900, '15m'],
   [1800, '30m'],
+  [3600, '60m'],
 ];
+
+/** 已配置的密钥不回显真实值，用一排掩码占位（密码框会渲染成圆点） */
+const MASK = 'maskedsecretmaskedsecret';
 
 function renderSettings() {
   const config = state.config;
@@ -484,8 +504,25 @@ function renderSettings() {
     </div>
 
     <div class="setting">
-      <div class="setting-label">API Key<span class="setting-hint">${state.aiHttpKeySet ? '已配置，留空保持不变' : '仅保存在本机 config.json（权限 600）'}</span></div>
-      <input class="input mono" id="aiHttpKey" type="password" value="" placeholder="${state.aiHttpKeySet ? '••••••••（留空保持不变）' : 'sk-…'}" autocomplete="off" />
+      <div class="setting-label">API Key<span class="setting-hint">${state.aiHttpKeySet ? '已配置 · 留空则保持不变' : '仅保存在本机 config.json（权限 600）'}</span></div>
+      <input class="input mono" id="aiHttpKey" type="password" value="${state.aiHttpKeySet ? MASK : ''}" data-masked="${state.aiHttpKeySet ? 'true' : 'false'}" placeholder="sk-…" autocomplete="off" />
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="setting">
+      <div class="setting-label">X 登录 Cookie<span class="setting-hint">${
+        state.xCookieSet
+          ? '已配置 · 用浏览器 Cookie 走 X 内部接口，数据最全最实时'
+          : '推荐用下面的按钮一键登录获取；也可手动粘贴 auth_token + ct0'
+      }</span></div>
+      ${
+        Platform.kind === 'tauri'
+          ? '<button class="btn primary" data-action="x-login" style="margin-bottom:8px">登录 X 自动获取</button>'
+          : ''
+      }
+      <input class="input mono" id="xAuthToken" type="password" value="${state.xCookieSet ? MASK : ''}" data-masked="${state.xCookieSet ? 'true' : 'false'}" placeholder="auth_token（手动粘贴，可选）" autocomplete="off" />
+      <input class="input mono" id="xCt0" type="password" value="${state.xCookieSet ? MASK : ''}" data-masked="${state.xCookieSet ? 'true' : 'false'}" placeholder="ct0（手动粘贴，可选）" autocomplete="off" style="margin-top:6px" />
     </div>
 
     <div class="setting-actions">
@@ -567,7 +604,11 @@ function collectSettings() {
     aiHttpFormat: $('#aiHttpFormat')?.value || 'openai',
   };
   const key = $('#aiHttpKey')?.value?.trim();
-  if (key) patch.aiHttpKey = key;
+  if (key && $('#aiHttpKey').dataset.masked !== 'true') patch.aiHttpKey = key;
+  const authToken = $('#xAuthToken')?.value?.trim();
+  if (authToken && $('#xAuthToken').dataset.masked !== 'true') patch.xAuthToken = authToken;
+  const ct0 = $('#xCt0')?.value?.trim();
+  if (ct0 && $('#xCt0').dataset.masked !== 'true') patch.xCt0 = ct0;
   return patch;
 }
 
@@ -689,6 +730,17 @@ async function testNotify() {
   showToast({ tone: 'info', title: '已发送测试通知', text: '看看屏幕右上角有没有弹出通知。' });
 }
 
+async function xLogin() {
+  const result = await Platform.xLogin();
+  if (result?.unsupported) {
+    showToast({ tone: 'info', title: '仅桌面应用支持', text: '浏览器模式请手动粘贴 Cookie，或在桌面应用中一键登录。' });
+  } else if (result?.ok) {
+    showToast({ tone: 'info', title: '已打开 X 登录窗口', text: '用邮箱/手机号登录，完成后窗口会自动关闭并保存 Cookie。' });
+  } else {
+    showToast({ tone: 'error', title: '打开登录窗口失败', text: result?.error ?? '未知错误' });
+  }
+}
+
 async function exportData() {
   const result = await Platform.exportData();
   if (result?.ok) {
@@ -783,6 +835,15 @@ function bindEvents() {
     }, 280);
   });
 
+  // 掩码字段聚焦时清空，方便直接输入新值
+  $('#settings').addEventListener('focusin', (event) => {
+    const input = event.target;
+    if (input?.dataset?.masked === 'true') {
+      input.value = '';
+      input.dataset.masked = 'false';
+    }
+  });
+
   $('#settings').addEventListener('click', async (event) => {
     const switchEl = event.target.closest('.switch');
     if (switchEl) {
@@ -828,6 +889,7 @@ function bindEvents() {
     else if (action === 'rescan') rescan();
     else if (action === 'export') exportData();
     else if (action === 'test-ai') testAi();
+    else if (action === 'x-login') xLogin();
   });
 
   $('#hero').addEventListener('click', async (event) => {
@@ -902,6 +964,26 @@ function connectEvents() {
       renderSettings();
       renderHero();
     },
+    'graphql-error': (message) => {
+      if (!/Cookie/.test(String(message))) return;
+      if (state.lastGraphqlToast === message) return;
+      state.lastGraphqlToast = message;
+      showToast({
+        tone: 'error',
+        title: 'X Cookie 失效',
+        text: `${message} — 请到设置里重新登录获取`,
+        timeout: 15000,
+      });
+    },
+    'x-cookie': (payload) => {
+      if (payload?.ok) {
+        state.xCookieSet = true;
+        renderSettings();
+        showToast({ tone: 'info', title: '已获取并保存 X Cookie', text: '内部接口抓取已启用，下一轮轮询生效。' });
+      } else {
+        showToast({ tone: 'error', title: '未获取到 Cookie', text: payload?.error ?? '请重试' });
+      }
+    },
     error: () => {
       const chip = $('#statusChip');
       chip.className = 'status-chip warn';
@@ -948,6 +1030,7 @@ async function boot() {
   state.ai = data.ai ?? null;
   state.ocr = data.ocr ?? null;
   state.aiHttpKeySet = Boolean(data.aiHttpKeySet);
+  state.xCookieSet = Boolean(data.xCookieSet);
   state.skew = data.serverTime - Date.now();
 
   bindEvents();
