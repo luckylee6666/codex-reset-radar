@@ -51,6 +51,8 @@ const ENGINE_DEFS: [(&str, &str, &[&str]); 3] = [
             "~/.local/bin/claude",
             "/usr/local/bin/claude",
             "/opt/homebrew/bin/claude",
+            "~\\.local\\bin\\claude.exe",
+            "~\\.local\\bin\\claude.cmd",
         ],
     ),
     (
@@ -60,16 +62,27 @@ const ENGINE_DEFS: [(&str, &str, &[&str]); 3] = [
             "/opt/homebrew/bin/codex",
             "/usr/local/bin/codex",
             "~/.cargo/bin/codex",
+            "~\\.cargo\\bin\\codex.exe",
+            "~\\AppData\\Roaming\\npm\\codex.cmd",
         ],
     ),
     (
         "ollama",
         "ollama",
-        &["/usr/local/bin/ollama", "/opt/homebrew/bin/ollama"],
+        &[
+            "/usr/local/bin/ollama",
+            "/opt/homebrew/bin/ollama",
+            "~\\AppData\\Local\\Programs\\Ollama\\ollama.exe",
+        ],
     ),
 ];
 
 fn expand_home(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~\\") {
+        if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+            return PathBuf::from(home).join(rest);
+        }
+    }
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = std::env::var_os("HOME") {
             return PathBuf::from(home).join(rest);

@@ -333,9 +333,9 @@ export function createServer({ store, poller, config }) {
 
     if (route === 'POST /api/test-notify') {
       await notifyMac({
-        title: 'Codex Reset Radar',
-        subtitle: '测试通知',
-        message: '通知通道正常，检测到重置公告时你会收到这样的提醒。',
+        title: 'Codex 限额即将重置',
+        subtitle: '通知通道测试',
+        message: 'Good news: rate limits have been reset for everyone. Enjoy!',
         sound: config.notifySound,
       }).catch((err) => err.message);
       return json(res, 200, { ok: true });

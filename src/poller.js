@@ -443,8 +443,9 @@ export class Poller extends EventEmitter {
     if (this.#config.notify) {
       const sound = this.#config.notifySound || undefined;
       for (const tweet of fresh.slice(0, 3)) {
+        // 标题直接用中文把话说明白，正文保留原文（不做翻译）
         await notifyMac({
-          title: tweet.source === 'simulate' ? 'Codex 重置信号（模拟）' : 'Codex 重置信号',
+          title: tweet.source === 'simulate' ? 'Codex 限额即将重置（模拟）' : 'Codex 限额即将重置',
           subtitle: `${ageText(Date.now() - tweet.createdTs)} · @${tweet.authorHandle || this.#config.handle}`,
           message: tweet.text.replace(/\s+/g, ' '),
           sound,
@@ -452,7 +453,7 @@ export class Poller extends EventEmitter {
       }
       if (fresh.length > 3) {
         await notifyMac({
-          title: 'Codex 重置信号',
+          title: 'Codex 限额即将重置',
           subtitle: `另有 ${fresh.length - 3} 条公告`,
           message: '打开 Codex Reset Radar 查看全部',
           sound,

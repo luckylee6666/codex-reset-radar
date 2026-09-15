@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod detect;
 mod fetch;
+mod notify;
 mod ocr;
 mod poller;
 mod store;

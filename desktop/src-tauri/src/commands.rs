@@ -365,19 +365,20 @@ pub async fn translate_tweet(app: AppHandle, id: String) -> Value {
 }
 
 #[tauri::command]
-pub fn test_notify(app: AppHandle) -> Value {
-    use tauri_plugin_notification::NotificationExt;
+pub async fn test_notify(app: AppHandle) -> Value {
     let sound = app.state::<AppState>().config.lock().unwrap().notify_sound.clone();
-    let mut builder = app
-        .notification()
-        .builder()
-        .title("Codex Reset Radar")
-        .body("通知通道正常，检测到重置公告时你会收到这样的提醒。");
-    if !sound.is_empty() {
-        builder = builder.sound(sound);
+    match crate::notify::send(
+        &app,
+        "Codex 限额即将重置",
+        "通知通道测试",
+        "Good news: rate limits have been reset for everyone. Enjoy!",
+        &sound,
+    )
+    .await
+    {
+        Ok(()) => json!({ "ok": true }),
+        Err(err) => json!({ "ok": false, "error": err }),
     }
-    let _ = builder.show();
-    json!({ "ok": true })
 }
 
 #[tauri::command]

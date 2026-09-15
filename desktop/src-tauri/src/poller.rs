@@ -738,39 +738,32 @@ pub async fn notify_pending(
     if !config.notify || pending.is_empty() {
         return 0;
     }
-    use tauri_plugin_notification::NotificationExt;
 
     for tweet in pending.iter().take(3) {
+        // 标题直接用中文把话说明白，正文保留原文（不做翻译）
         let title = if tweet["source"].as_str() == Some("simulate") {
-            "Codex 重置信号（模拟）"
+            "Codex 限额即将重置（模拟）"
         } else {
-            "Codex 重置信号"
+            "Codex 限额即将重置"
         };
         let created = tweet["createdTs"].as_i64().unwrap_or_else(now_ms);
         let handle = tweet["authorHandle"].as_str().unwrap_or("");
-        let text = tweet["text"]
+        let subtitle = format!("{} · @{handle}", age_text(now_ms() - created));
+        let body = tweet["text"]
             .as_str()
             .unwrap_or("")
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
-        let body = format!("{} · @{handle}\n{text}", age_text(now_ms() - created));
-        let mut builder = app.notification().builder().title(title).body(body);
-        if !config.notify_sound.is_empty() {
-            builder = builder.sound(config.notify_sound.clone());
+        if let Err(err) = crate::notify::send(app, title, &subtitle, &body, &config.notify_sound).await
+        {
+            let _ = app.emit("notify-error", err);
         }
-        let _ = builder.show();
     }
+
     if pending.len() > 3 {
-        let mut builder = app
-            .notification()
-            .builder()
-            .title("Codex 重置信号")
-            .body(format!("另有 {} 条公告，打开面板查看全部", pending.len() - 3));
-        if !config.notify_sound.is_empty() {
-            builder = builder.sound(config.notify_sound.clone());
-        }
-        let _ = builder.show();
+        let body = format!("另有 {} 条公告，打开面板查看全部", pending.len() - 3);
+        let _ = crate::notify::send(app, "Codex 限额即将重置", "", &body, &config.notify_sound).await;
     }
     pending.len()
 }

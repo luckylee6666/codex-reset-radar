@@ -39,6 +39,9 @@ const state = {
 
 /* ── utils ─────────────────────────────────────────────── */
 
+/** 平台判断（仅用于文案差异） */
+const IS_WINDOWS = /Windows/i.test(navigator.userAgent);
+
 const esc = (s) =>
   String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -198,7 +201,7 @@ function renderHero() {
           <span class="badge ok"><span class="pulse-dot"></span>检测到重置公告</span>
           <span class="hero-time">${alert.source === 'simulate' ? '模拟 · ' : ''}${esc(fmtAgo(alert.createdTs))} · ${hasAi ? `AI 判定${alert.aiConfidence != null ? ` ${Math.round(alert.aiConfidence * 100)}%` : ''}` : `得分 ${alert.resetScore}`}</span>
         </div>
-        <h2 class="hero-title">Codex 限额已重置，尽快使用</h2>
+        <h2 class="hero-title">Codex 限额即将重置，准备开用</h2>
         <p class="hero-text">${highlight(alert.text, signals.map((s) => s.match))}</p>
         <div class="hero-signals">
           ${hasAi ? `<span class="signal pos">AI ${esc(alert.aiEngine || '')}：${esc(alert.aiReason || '确认公告')}</span>` : ''}
@@ -430,7 +433,7 @@ function renderSettings() {
     <div class="setting setting-row">
       <div>
         <div class="setting-label">系统通知</div>
-        <div class="setting-hint">检测到重置公告时发送 macOS 通知</div>
+        <div class="setting-hint">检测到重置公告时发送系统通知</div>
       </div>
       <button class="switch" data-field="notify" aria-checked="${config.notify ? 'true' : 'false'}" aria-label="系统通知"></button>
     </div>
@@ -573,7 +576,7 @@ function renderSettings() {
     <div class="setting setting-row">
       <div>
         <div class="setting-label">开机自启</div>
-        <div class="setting-hint">登录后自动在后台运行；关闭窗口不退出，从菜单栏图标唤起</div>
+        <div class="setting-hint">登录后自动在后台运行；关闭窗口不退出，从 ${IS_WINDOWS ? '系统托盘' : '菜单栏'}图标唤起</div>
       </div>
       <button class="switch" data-field="autostart" aria-checked="${config.autostart ? 'true' : 'false'}" aria-label="开机自启"></button>
     </div>`
@@ -760,8 +763,17 @@ async function rescan() {
 }
 
 async function testNotify() {
-  await Platform.testNotify();
-  showToast({ tone: 'info', title: '已发送测试通知', text: '看看屏幕右上角有没有弹出通知。' });
+  const result = await Platform.testNotify();
+  if (result?.ok) {
+    showToast({ tone: 'info', title: '已发送测试通知', text: '看看屏幕右上角有没有弹出通知。' });
+  } else {
+    showToast({
+      tone: 'error',
+      title: '系统通知发送失败',
+      text: result?.error ?? '请在「系统设置 → 通知」里允许 Codex Reset Radar',
+      timeout: 20000,
+    });
+  }
 }
 
 /** 把粘贴内容解析出的两个值填进输入框，并给出即时反馈 */
