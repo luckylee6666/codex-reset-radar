@@ -124,6 +124,7 @@ pub fn run() {
             commands::simulate,
             commands::test_notify,
             commands::test_ai,
+            commands::translate_tweet,
             commands::open_external,
             commands::open_x_login,
             commands::export_data,

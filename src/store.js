@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS tweets (
   ai_engine      TEXT,
   ai_at          TEXT,
   ocr_text       TEXT,
-  ocr_at         TEXT
+  ocr_at         TEXT,
+  translation    TEXT,
+  translated_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tweets_created ON tweets (created_ts DESC);
 CREATE INDEX IF NOT EXISTS idx_tweets_reset ON tweets (is_reset, created_ts DESC);
@@ -57,6 +59,8 @@ function ensureColumns(db) {
     ['ai_at', 'ai_at TEXT'],
     ['ocr_text', 'ocr_text TEXT'],
     ['ocr_at', 'ocr_at TEXT'],
+    ['translation', 'translation TEXT'],
+    ['translated_at', 'translated_at TEXT'],
   ];
   for (const [name, ddl] of additions) {
     if (!columns.has(name)) db.exec(`ALTER TABLE tweets ADD COLUMN ${ddl}`);
@@ -92,6 +96,8 @@ function rowOut(r) {
     aiAt: r.ai_at ?? null,
     ocrText: r.ocr_text ?? null,
     ocrAt: r.ocr_at ?? null,
+    translation: r.translation ?? null,
+    translatedAt: r.translated_at ?? null,
   };
 }
 
@@ -181,6 +187,14 @@ export function openStore(dbPath) {
 
   function setOcrText(id, text) {
     db.prepare('UPDATE tweets SET ocr_text = ?, ocr_at = ? WHERE id = ?').run(
+      text ?? '',
+      new Date().toISOString(),
+      id,
+    );
+  }
+
+  function setTranslation(id, text) {
+    db.prepare('UPDATE tweets SET translation = ?, translated_at = ? WHERE id = ?').run(
       text ?? '',
       new Date().toISOString(),
       id,
@@ -301,6 +315,7 @@ export function openStore(dbPath) {
     pendingAiCandidates,
     clearAiVerdict,
     setOcrText,
+    setTranslation,
     pendingOcrCandidates,
     markNotified,
     getTweets,

@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS tweets (
   ai_engine      TEXT,
   ai_at          TEXT,
   ocr_text       TEXT,
-  ocr_at         TEXT
+  ocr_at         TEXT,
+  translation    TEXT,
+  translated_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tweets_created ON tweets (created_ts DESC);
 CREATE INDEX IF NOT EXISTS idx_tweets_reset ON tweets (is_reset, created_ts DESC);
@@ -77,6 +79,8 @@ fn row_to_json(row: &Row) -> rusqlite::Result<Value> {
         "aiAt": row.get::<_, Option<String>>("ai_at")?,
         "ocrText": row.get::<_, Option<String>>("ocr_text")?,
         "ocrAt": row.get::<_, Option<String>>("ocr_at")?,
+        "translation": row.get::<_, Option<String>>("translation")?,
+        "translatedAt": row.get::<_, Option<String>>("translated_at")?,
     }))
 }
 
@@ -101,6 +105,8 @@ fn migrate_ai_columns(conn: &Connection) -> Result<(), String> {
         ("ai_at", "ALTER TABLE tweets ADD COLUMN ai_at TEXT"),
         ("ocr_text", "ALTER TABLE tweets ADD COLUMN ocr_text TEXT"),
         ("ocr_at", "ALTER TABLE tweets ADD COLUMN ocr_at TEXT"),
+        ("translation", "ALTER TABLE tweets ADD COLUMN translation TEXT"),
+        ("translated_at", "ALTER TABLE tweets ADD COLUMN translated_at TEXT"),
     ];
     for (name, ddl) in additions {
         if !columns.iter().any(|c| c == name) {
@@ -233,6 +239,16 @@ impl Store {
         self.conn
             .execute(
                 "UPDATE tweets SET ocr_text = ?, ocr_at = ? WHERE id = ?",
+                params![text, now_iso(), id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn set_translation(&mut self, id: &str, text: &str) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE tweets SET translation = ?, translated_at = ? WHERE id = ?",
                 params![text, now_iso(), id],
             )
             .map_err(|e| e.to_string())?;

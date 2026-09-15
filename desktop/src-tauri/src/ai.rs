@@ -214,11 +214,11 @@ pub fn extract_http_content(data: &Value, format: &str) -> String {
     }
 }
 
-async fn judge_http(
+async fn http_text(
     prompt: &str,
     options: &AiOptions,
     client: &reqwest::Client,
-) -> Result<Verdict, String> {
+) -> Result<String, String> {
     if !options.http_configured() {
         return Err("http: 未配置地址或模型".into());
     }
@@ -258,8 +258,118 @@ async fn judge_http(
         .json()
         .await
         .map_err(|err| format!("http: {err}"))?;
-    parse_verdict(&extract_http_content(&data, &options.http_format))
-        .ok_or_else(|| "http: 响应无法解析为判定 JSON".to_string())
+    Ok(extract_http_content(&data, &options.http_format))
+}
+
+async fn judge_http(
+    prompt: &str,
+    options: &AiOptions,
+    client: &reqwest::Client,
+) -> Result<Verdict, String> {
+    let content = http_text(prompt, options, client).await?;
+    parse_verdict(&content).ok_or_else(|| "http: 响应无法解析为判定 JSON".to_string())
+}
+
+async fn cli_text(id: &str, prompt: &str, options: &AiOptions) -> Result<String, String> {
+    let bin = resolve_bin(id);
+    let args: Vec<String> = match id {
+        "claude" => vec!["-p".into(), prompt.to_string()],
+        "codex" => vec!["exec".into(), "--skip-git-repo-check".into(), prompt.to_string()],
+        "ollama" => vec![
+            "run".into(),
+            if options.ollama_model.is_empty() {
+                "llama3.2".into()
+            } else {
+                options.ollama_model.clone()
+            },
+            prompt.to_string(),
+        ],
+        _ => return Err(format!("{id}: 未知引擎")),
+    };
+    let run = Command::new(&bin)
+        .args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+    match tokio::time::timeout(Duration::from_secs(options.timeout_sec.max(20)), run).await {
+        Ok(Ok(output)) if output.status.success() => {
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        }
+        Ok(Ok(output)) => Err(format!("{id}: 退出码 {:?}", output.status.code())),
+        Ok(Err(err)) => Err(format!("{id}: {err}")),
+        Err(_) => Err(format!("{id}: 超时")),
+    }
+}
+
+pub fn build_translate_prompt(text: &str) -> String {
+    format!(
+        r#"把下面的推文翻译成简体中文。要求：
+- 只输出译文，不要任何解释、标题或前后缀
+- 保留 @用户名、#话题、URL、命令与代码原样
+- 专有名词保留英文（Codex、ChatGPT、OpenAI 等）
+- 口语、俚语、梗按中文习惯意译
+
+推文：
+"""
+{text}
+"""#
+    )
+}
+
+fn clean_text(raw: &str) -> String {
+    let mut text = raw.trim().to_string();
+    if let Some(stripped) = text.strip_prefix("```") {
+        let after_lang = stripped.trim_start_matches(|c: char| c.is_ascii_alphabetic());
+        text = after_lang.trim_start().to_string();
+    }
+    if let Some(stripped) = text.strip_suffix("```") {
+        text = stripped.trim_end().to_string();
+    }
+    text
+}
+
+/// 翻译推文为简体中文，返回 (译文, 引擎)
+pub async fn translate_text(
+    text: &str,
+    options: &AiOptions,
+    client: &reqwest::Client,
+) -> Result<(String, String), String> {
+    let prompt = build_translate_prompt(text);
+    let order: Vec<String> = if options.engine == "auto" {
+        let mut list: Vec<String> = Vec::new();
+        if options.http_configured() {
+            list.push("http".into());
+        }
+        list.push("claude".into());
+        list.push("codex".into());
+        if ollama_running().await {
+            list.push("ollama".into());
+        }
+        list
+    } else {
+        vec![options.engine.clone()]
+    };
+
+    let mut errors: Vec<String> = Vec::new();
+    for id in order {
+        let result: Result<String, String> = if id == "http" {
+            http_text(&prompt, options, client).await
+        } else {
+            cli_text(&id, &prompt, options).await
+        };
+        match result {
+            Ok(raw) => {
+                let cleaned = clean_text(&raw);
+                if !cleaned.is_empty() {
+                    return Ok((cleaned, id));
+                }
+                errors.push(format!("{id}: 输出为空"));
+            }
+            Err(err) => errors.push(err),
+        }
+    }
+    Err(errors.join("；"))
 }
 
 /// 依次尝试引擎（auto 模式：http → claude → codex → ollama），全部失败返回 Err

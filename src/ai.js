@@ -133,6 +133,19 @@ ${text}
 {"is_reset": true 或 false, "confidence": 0 到 1, "reason": "不超过 20 字的中文理由"}`;
 }
 
+export function buildTranslatePrompt(text) {
+  return `把下面的推文翻译成简体中文。要求：
+- 只输出译文，不要任何解释、标题或前后缀
+- 保留 @用户名、#话题、URL、命令与代码原样
+- 专有名词保留英文（Codex、ChatGPT、OpenAI 等）
+- 口语、俚语、梗按中文习惯意译
+
+推文：
+"""
+${text}
+"""`;
+}
+
 export function parseVerdict(stdout) {
   const match = String(stdout).match(/\{[\s\S]*?\}/);
   if (!match) return null;
@@ -166,7 +179,7 @@ export function extractHttpContent(data, format = 'openai') {
   return '';
 }
 
-export async function judgeHttp(prompt, options = {}, timeoutSec = 90) {
+async function httpContent(prompt, options = {}, timeoutSec = 90) {
   const { httpUrl, httpKey = '', httpModel, httpFormat = 'openai' } = options;
   if (!isHttpConfigured(options)) throw new Error('未配置 HTTP 地址或模型');
 
@@ -189,9 +202,75 @@ export async function judgeHttp(prompt, options = {}, timeoutSec = 90) {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
-  const verdict = parseVerdict(extractHttpContent(data, httpFormat));
+  return extractHttpContent(data, httpFormat);
+}
+
+export async function judgeHttp(prompt, options = {}, timeoutSec = 90) {
+  const verdict = parseVerdict(await httpContent(prompt, options, timeoutSec));
   if (!verdict) throw new Error('响应无法解析为判定 JSON');
   return verdict;
+}
+
+function cleanText(raw) {
+  return String(raw ?? '')
+    .replace(/^\s*```[a-z]*\s*/i, '')
+    .replace(/```\s*$/, '')
+    .trim();
+}
+
+async function cliOutput(def, prompt, ollamaModel, timeoutSec) {
+  const { stdout } = await run(resolveBin(def), def.args(prompt, ollamaModel), {
+    timeout: timeoutSec * 1000,
+    maxBuffer: 1024 * 1024,
+  });
+  return stdout;
+}
+
+export function aiOptionsFromConfig(config = {}) {
+  return {
+    engine: config.aiEngine || 'auto',
+    timeoutSec: Math.max(20, Number(config.aiTimeoutSec) || 90),
+    ollamaModel: config.aiOllamaModel || '',
+    httpUrl: config.aiHttpUrl || '',
+    httpKey: config.aiHttpKey || '',
+    httpModel: config.aiHttpModel || '',
+    httpFormat: config.aiHttpFormat || 'openai',
+  };
+}
+
+/** 翻译推文为简体中文；返回 { text, engine } 或 { error } */
+export async function translateText(text, options = {}) {
+  const { engine = 'auto', timeoutSec = 90, ollamaModel = '' } = options;
+  const prompt = buildTranslatePrompt(text);
+  const order =
+    engine === 'auto'
+      ? [
+          ...(isHttpConfigured(options) ? ['http'] : []),
+          'claude',
+          'codex',
+          ...((await ollamaRunning()) ? ['ollama'] : []),
+        ]
+      : [engine];
+  const errors = [];
+
+  for (const id of order) {
+    try {
+      let output;
+      if (id === 'http') {
+        output = await httpContent(prompt, options, timeoutSec);
+      } else {
+        const def = ENGINE_DEFS.find((e) => e.id === id);
+        if (!def) continue;
+        output = await cliOutput(def, prompt, ollamaModel, timeoutSec);
+      }
+      const translated = cleanText(output);
+      if (translated) return { text: translated, engine: id };
+      errors.push(`${id}: 输出为空`);
+    } catch (err) {
+      errors.push(`${id}: ${err.killed ? '超时' : err.message.split('\n')[0]}`);
+    }
+  }
+  return { error: errors.join('；') || '没有可用的 AI 引擎' };
 }
 
 /* ── 判定入口 ─────────────────────────────────────────── */

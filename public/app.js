@@ -264,6 +264,15 @@ function tweetHTML(tweet) {
   const ocrLine = tweet.ocrText
     ? `<div class="tweet-ai">图片文字：${esc(tweet.ocrText.replace(/\s+/g, ' ').slice(0, 160))}${tweet.ocrText.length > 160 ? '…' : ''} <span class="ai-engine">ocr</span></div>`
     : '';
+  const translateLabel = tweet.translation
+    ? tweet.showTranslation === false
+      ? '查看译文'
+      : '收起译文'
+    : '翻译';
+  const translationBlock =
+    tweet.translation && tweet.showTranslation !== false
+      ? `<div class="tweet-translation">${esc(tweet.translation)}</div>`
+      : '';
   return `
     <article class="tweet ${isReset ? 'is-reset' : ''}">
       ${tweet.avatar ? `<img class="avatar" data-fallback="avatar" data-initial="${esc((tweet.authorName || tweet.authorHandle || 'T').slice(0, 1).toUpperCase())}" src="${esc(proxyImg(tweet.avatar))}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : '<div class="avatar avatar-fallback">T</div>'}
@@ -278,6 +287,8 @@ function tweetHTML(tweet) {
           ${tweet.source === 'simulate' ? '<span class="pill sim">模拟</span>' : ''}
         </header>
         <div class="tweet-text">${highlight(tweet.text, signals.map((s) => s.match))}</div>
+        ${translationBlock}
+        <button class="tweet-translate" data-translate-id="${esc(tweet.id)}">${translateLabel}</button>
         ${aiLine}
         ${ocrLine}
         ${
@@ -897,6 +908,37 @@ function bindEvents() {
       state.q = event.target.value.trim();
       loadTweets(true);
     }, 280);
+  });
+
+  // 推文翻译（AI，结果缓存）
+  $('#feed').addEventListener('click', async (event) => {
+    const btn = event.target.closest('[data-translate-id]');
+    if (!btn) return;
+    const tweet = state.tweets.find((t) => t.id === btn.dataset.translateId);
+    if (!tweet) return;
+    if (tweet.translation) {
+      tweet.showTranslation = tweet.showTranslation === false;
+      renderFeed();
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = '翻译中…';
+    try {
+      const result = await Platform.translate(tweet.id);
+      if (result?.ok) {
+        tweet.translation = result.translation;
+        tweet.showTranslation = true;
+        renderFeed();
+      } else {
+        btn.disabled = false;
+        btn.textContent = '翻译';
+        showToast({ tone: 'error', title: '翻译失败', text: result?.error ?? '未知错误' });
+      }
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = '翻译';
+      showToast({ tone: 'error', title: '翻译失败', text: err.message });
+    }
   });
 
   // 掩码字段聚焦时清空，方便直接输入新值

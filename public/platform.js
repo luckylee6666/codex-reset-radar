@@ -59,6 +59,12 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ text }),
       }),
+    translate: (id) =>
+      httpJson('/api/translate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id }),
+      }),
     exportData: async () => {
       window.location.href = '/api/export';
       return { ok: true };
@@ -102,6 +108,7 @@
     testNotify: () => invoke('test_notify'),
     xLogin: () => invoke('open_x_login'),
     testAi: (text) => invoke('test_ai', { text }),
+    translate: (id) => invoke('translate_tweet', { id }),
     exportData: () => invoke('export_data'),
     openExternal: (url) => invoke('open_external', { url }),
     setAutostart: (enabled) => invoke('set_autostart', { enabled }),

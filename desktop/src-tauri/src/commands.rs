@@ -337,6 +337,34 @@ pub fn open_external(url: String) -> Value {
 }
 
 #[tauri::command]
+pub async fn translate_tweet(app: AppHandle, id: String) -> Value {
+    let state = app.state::<AppState>();
+    let config = state.config.lock().unwrap().clone();
+    let tweet = state.store.lock().unwrap().get_tweet(&id);
+    let Some(tweet) = tweet else {
+        return json!({ "ok": false, "error": "推文不存在" });
+    };
+    if let Some(cached) = tweet["translation"].as_str() {
+        if !cached.is_empty() {
+            return json!({ "ok": true, "translation": cached, "cached": true });
+        }
+    }
+
+    let text = tweet["text"].as_str().unwrap_or("").to_string();
+    let options = crate::ai::AiOptions::from_config(&config);
+    match crate::ai::translate_text(&text, &options, &state.client).await {
+        Ok((translation, engine)) => {
+            {
+                let mut store = state.store.lock().unwrap();
+                let _ = store.set_translation(&id, &translation);
+            }
+            json!({ "ok": true, "translation": translation, "engine": engine })
+        }
+        Err(err) => json!({ "ok": false, "error": err }),
+    }
+}
+
+#[tauri::command]
 pub fn test_notify(app: AppHandle) -> Value {
     use tauri_plugin_notification::NotificationExt;
     let sound = app.state::<AppState>().config.lock().unwrap().notify_sound.clone();

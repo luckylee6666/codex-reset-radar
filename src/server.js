@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { ROOT, DATA_DIR, saveConfig } from './config.js';
 import { getRuleInfo, detectReset } from './detect.js';
-import { listAvailableEngines, judgeTweet } from './ai.js';
+import { listAvailableEngines, judgeTweet, translateText, aiOptionsFromConfig } from './ai.js';
 import { ocrStatus } from './ocr.js';
 import { notifyMac } from './notify.js';
 
@@ -344,17 +344,23 @@ export function createServer({ store, poller, config }) {
     if (route === 'POST /api/test-ai') {
       const body = await readBody(req);
       const text = String(body.text ?? 'Reset all propagated. Sweet dreams.').trim();
-      const verdict = await judgeTweet(text, {
-        engine: config.aiEngine || 'auto',
-        timeoutSec: Math.max(20, Number(config.aiTimeoutSec) || 90),
-        ollamaModel: config.aiOllamaModel || '',
-        httpUrl: config.aiHttpUrl || '',
-        httpKey: config.aiHttpKey || '',
-        httpModel: config.aiHttpModel || '',
-        httpFormat: config.aiHttpFormat || 'openai',
-      });
+      const verdict = await judgeTweet(text, aiOptionsFromConfig(config));
       if (verdict.error) return json(res, 200, { ok: false, error: verdict.error });
       return json(res, 200, { ok: true, text, verdict });
+    }
+
+    if (route === 'POST /api/translate') {
+      const body = await readBody(req);
+      const id = String(body.id ?? '');
+      const tweet = store.getTweet(id);
+      if (!tweet) return json(res, 404, { ok: false, error: '推文不存在' });
+      if (tweet.translation) {
+        return json(res, 200, { ok: true, translation: tweet.translation, cached: true });
+      }
+      const result = await translateText(tweet.text, aiOptionsFromConfig(config));
+      if (result.error) return json(res, 200, { ok: false, error: result.error });
+      store.setTranslation(id, result.text);
+      return json(res, 200, { ok: true, translation: result.text, engine: result.engine });
     }
 
     return json(res, 404, { ok: false, error: 'not found' });
