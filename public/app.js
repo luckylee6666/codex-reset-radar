@@ -299,7 +299,7 @@ function tweetHTML(tweet) {
             ? `<div class="media-grid n${media.length}">${media
                 .map(
                   (m) =>
-                    `<a href="${esc(tweet.permalink || m.url)}" target="_blank" rel="noreferrer"><img data-fallback="media" src="${esc(proxyImg(m.url))}" alt="" loading="lazy" referrerpolicy="no-referrer" /></a>`,
+                    `<a class="media-item" href="${esc(tweet.permalink || '#')}" data-full="${esc(proxyImg(m.url))}" title="点击预览"><img data-fallback="media" src="${esc(proxyImg(m.url))}" alt="" loading="lazy" referrerpolicy="no-referrer" /></a>`,
                 )
                 .join('')}</div>`
             : ''
@@ -673,6 +673,29 @@ function renderRules() {
     <div class="rule-note">负向规则会扣分，避免把 “git reset”、“重置密码” 这类推文误报成限额重置。调整阈值或添加关键词后，可点 “重新扫描” 立即重算全部历史推文。</div>`;
 }
 
+/* ── 图片灯箱 ─────────────────────────────────────────── */
+
+function openLightbox(url, permalink) {
+  if (!url) return;
+  const box = $('#lightbox');
+  $('#lightboxImg').src = url;
+  const openX = $('#lightboxOpenX');
+  if (permalink && /^https?:\/\//.test(permalink)) {
+    openX.href = permalink;
+    openX.hidden = false;
+  } else {
+    openX.hidden = true;
+  }
+  box.hidden = false;
+}
+
+function closeLightbox() {
+  const box = $('#lightbox');
+  if (box.hidden) return;
+  box.hidden = true;
+  $('#lightboxImg').src = '';
+}
+
 /* ── Toast ─────────────────────────────────────────────── */
 
 function showToast({ tone = 'info', title, text = '', action, actionHref, timeout }) {
@@ -863,6 +886,18 @@ async function setRunning(next) {
 
 function bindEvents() {
   document.addEventListener('click', (event) => {
+    // 图片点击 → 灯箱预览（优先于外链处理）
+    const mediaItem = event.target.closest?.('.media-item');
+    if (mediaItem) {
+      event.preventDefault();
+      openLightbox(mediaItem.dataset.full, mediaItem.getAttribute('href'));
+      return;
+    }
+    if (event.target.id === 'lightbox') {
+      closeLightbox();
+      return;
+    }
+
     const anchor = event.target.closest?.('a[href]');
     if (!anchor) return;
     const href = anchor.getAttribute('href') ?? '';
@@ -872,6 +907,11 @@ function bindEvents() {
       Platform.openExternal(href);
     }
   });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeLightbox();
+  });
+  $('#lightboxClose').addEventListener('click', closeLightbox);
 
   document.addEventListener(
     'error',

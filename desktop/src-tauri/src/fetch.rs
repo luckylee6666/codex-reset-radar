@@ -101,6 +101,39 @@ pub(crate) fn iso_and_ts(raw: &str) -> (String, i64) {
 }
 
 fn media_from(value: &Value) -> Vec<Media> {
+    // 顺序：mediaDetails（单推接口的真实图片地址）→ extended_entities → entities
+    let lists = [
+        value.get("mediaDetails"),
+        value.pointer("/extended_entities/media"),
+        value.pointer("/entities/media"),
+    ];
+    for list in lists {
+        let Some(items) = list.and_then(|m| m.as_array()) else { continue };
+        if items.is_empty() {
+            continue;
+        }
+        let media: Vec<Media> = items
+            .iter()
+            .filter_map(|item| {
+                let url = item
+                    .get("media_url_https")
+                    .or_else(|| item.get("media_url"))
+                    .and_then(|u| u.as_str())?;
+                Some(Media {
+                    kind: item.get("type").and_then(|t| t.as_str()).unwrap_or("photo").to_string(),
+                    url: url.to_string(),
+                })
+            })
+            .collect();
+        if !media.is_empty() {
+            return media;
+        }
+    }
+    Vec::new()
+}
+
+#[allow(dead_code)]
+fn media_from_legacy(value: &Value) -> Vec<Media> {
     value
         .get("entities")
         .and_then(|e| e.get("media"))

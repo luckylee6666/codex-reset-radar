@@ -18,14 +18,22 @@ export function decodeEntities(text = '') {
     .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)));
 }
 
+export function extractMedia(t) {
+  const lists = [t.mediaDetails, t.extended_entities?.media, t.entities?.media];
+  for (const list of lists) {
+    if (!Array.isArray(list) || !list.length) continue;
+    const media = list
+      .map((m) => ({ type: m.type ?? 'photo', url: m.media_url_https ?? m.media_url ?? '' }))
+      .filter((m) => m.url);
+    if (media.length) return media;
+  }
+  return [];
+}
+
 export function normalizeTweet(t) {
   const user = t.user ?? {};
   const created = new Date(t.created_at);
   const valid = !Number.isNaN(created.getTime());
-  const media = (t.entities?.media ?? [])
-    .map((m) => ({ type: m.type ?? 'photo', url: m.media_url_https ?? m.media_url ?? '' }))
-    .filter((m) => m.url);
-
   return {
     id: String(t.id_str ?? t.id),
     createdAt: valid ? created.toISOString() : new Date().toISOString(),
@@ -42,7 +50,7 @@ export function normalizeTweet(t) {
     authorName: user.name ?? '',
     authorHandle: user.screen_name ?? '',
     lang: t.lang ?? '',
-    media,
+    media: extractMedia(t),
   };
 }
 
@@ -178,10 +186,6 @@ export function normalizeTweetDetail(t) {
   const user = t.user ?? {};
   const created = new Date(t.created_at);
   const valid = !Number.isNaN(created.getTime());
-  const media = (t.entities?.media ?? [])
-    .map((m) => ({ type: m.type ?? 'photo', url: m.media_url_https ?? m.media_url ?? '' }))
-    .filter((m) => m.url);
-
   return {
     id: String(t.id_str ?? t.id),
     createdAt: valid ? created.toISOString() : new Date().toISOString(),
@@ -196,7 +200,7 @@ export function normalizeTweetDetail(t) {
     authorName: user.name ?? '',
     authorHandle: user.screen_name ?? '',
     lang: t.lang ?? '',
-    media,
+    media: extractMedia(t),
   };
 }
 
