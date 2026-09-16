@@ -1,5 +1,7 @@
 # Codex Reset Radar
 
+**中文** | [English](README.en.md)
+
 监控 [@thsottiaux](https://x.com/thsottiaux)（OpenAI Codex 负责人）的 **Codex 限额重置公告**：
 一旦他宣布重置用量额度，立刻发系统通知——不错过"额度到账、快去用"的窗口。
 
@@ -97,7 +99,7 @@ test/                    单测（node --test + cargo test）
 - 登录态会过期，届时应用会提示，用「从剪贴板导入」更新即可
 - 应用内登录窗口不支持 Google / Apple 弹窗（Google 对嵌入式浏览器的限制），请用剪贴板导入
 - 系统通知通过 macOS 脚本机制投递，通知来源会显示为「脚本编辑器」——未签名应用的系统限制，要显示为自己的图标需要开发者证书签名+公证
-- 图片 OCR 仅 macOS；Windows 版未经实机验证
+- 图片 OCR 仅 macOS；Windows 版已在 Windows 11 实机验证（安装/卸载、抓取、界面渲染、系统通知）
 - 应用未签名/未公证，首次打开需右键；分发给他人需自行签名
 - 国内网络需要能访问 X 的网络环境（走系统代理设置）
 - 本项目为个人工具，与 OpenAI 无关
