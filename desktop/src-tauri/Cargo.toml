@@ -1,6 +1,6 @@
 [package]
 name = "codex-reset-radar"
-version = "0.1.6"
+version = "0.1.7"
 description = "Codex Reset Radar"
 authors = ["lucky"]
 edition = "2021"
