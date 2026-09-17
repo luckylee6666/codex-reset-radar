@@ -9,6 +9,7 @@ mod poller;
 mod store;
 mod x_graphql;
 
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use tauri::{Manager, WindowEvent};
@@ -43,6 +44,41 @@ fn show_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
+    }
+}
+
+/// 数据目录放家目录点目录（`~/.codex-reset-radar`），不用 `~/Library/Application Support/<bundle-id>`：
+/// 清理工具（柠檬清理等）卸载 App 时会把 Application Support 下的"应用残留"整个删掉，
+/// 连 config.json 里的 X Cookie / AI Key 一起带走。首次启动时把旧目录整体搬过来。
+fn resolve_data_dir(app: &tauri::AppHandle) -> PathBuf {
+    let legacy = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let Ok(home) = app.path().home_dir() else {
+        return legacy;
+    };
+    let dir = home.join(".codex-reset-radar");
+    if !dir.exists() && legacy.exists() {
+        if std::fs::rename(&legacy, &dir).is_err() {
+            copy_files(&legacy, &dir);
+        }
+    }
+    dir
+}
+
+/// 跨卷等 rename 失败时的兜底：逐文件复制（数据目录里只有平铺文件，没有子目录）
+fn copy_files(from: &Path, to: &Path) {
+    if std::fs::create_dir_all(to).is_err() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(from) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.path().is_file() {
+            let _ = std::fs::copy(entry.path(), to.join(entry.file_name()));
+        }
     }
 }
 
@@ -132,10 +168,7 @@ pub fn run() {
             commands::set_autostart,
         ])
         .setup(|app| {
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .unwrap_or_else(|_| std::env::temp_dir());
+            let data_dir = resolve_data_dir(app.handle());
             std::fs::create_dir_all(&data_dir)?;
             let store = store::Store::open(&data_dir.join("codex-reset.db"))?;
             let config_path = data_dir.join("config.json");
