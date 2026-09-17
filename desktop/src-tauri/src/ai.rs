@@ -104,6 +104,16 @@ fn resolve_bin(id: &str) -> String {
     id.to_string()
 }
 
+/// 从 Finder 启动的 App 继承的工作目录是 `/`，CLI 会把它当成项目根去扫描，
+/// 途中读到用户的媒体目录会触发 macOS 媒体库（Apple Music）权限弹窗，
+/// 且弹窗归属到本 App（子进程的权限请求算在 responsible process 头上）。
+/// 让 CLI 在自己的临时目录里跑，既不弹窗也不必扫整个文件系统。
+fn work_dir() -> PathBuf {
+    let dir = std::env::temp_dir().join("codex-reset-radar");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
 /// ollama 的 CLI 是客户端，执行任何命令都会拉起本地服务；
 /// 这里只用 TCP 探活（无副作用），避免"探测即启动"
 pub async fn ollama_running() -> bool {
@@ -130,6 +140,7 @@ pub async fn list_available_engines(options: &AiOptions) -> Vec<String> {
         }
         let bin = resolve_bin(id);
         let run = Command::new(&bin)
+            .current_dir(work_dir())
             .arg("--version")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -300,6 +311,7 @@ async fn cli_text(id: &str, prompt: &str, options: &AiOptions) -> Result<String,
         _ => return Err(format!("{id}: 未知引擎")),
     };
     let run = Command::new(&bin)
+        .current_dir(work_dir())
         .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -439,6 +451,7 @@ pub async fn judge_tweet(
         };
 
         let run = Command::new(&bin)
+            .current_dir(work_dir())
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
