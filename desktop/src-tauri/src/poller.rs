@@ -620,6 +620,7 @@ async fn judge_with_ai(app: &AppHandle) -> usize {
     let options = crate::ai::AiOptions::from_config(&config);
     let mut judged = 0usize;
     let mut changed: Vec<Value> = Vec::new();
+    let mut alerts: Vec<Value> = Vec::new();
     for tweet in &candidates {
         let text = tweet["text"].as_str().unwrap_or("").to_string();
         let id = tweet["id"].as_str().unwrap_or("").to_string();
@@ -633,9 +634,10 @@ async fn judge_with_ai(app: &AppHandle) -> usize {
                 }
                 judged += 1;
                 if let Some(updated) = state.store.lock().unwrap().get_tweet(&id) {
-                    if updated["isReset"].as_bool().unwrap_or(false) != before {
-                        changed.push(updated);
+                    if updated["isReset"].as_bool().unwrap_or(false) && !before {
+                        alerts.push(updated.clone());
                     }
+                    changed.push(updated);
                 }
             }
             Err(err) => {
@@ -647,20 +649,18 @@ async fn judge_with_ai(app: &AppHandle) -> usize {
 
     if !changed.is_empty() {
         let _ = app.emit("tweets", changed.clone());
-        for tweet in &changed {
-            if tweet["isReset"].as_bool().unwrap_or(false) {
-                let _ = app.emit(
-                    "alert",
-                    json!({
-                        "tweet": tweet,
-                        "detection": {
-                            "isReset": true,
-                            "score": tweet["resetScore"],
-                            "signals": tweet["resetSignals"],
-                        }
-                    }),
-                );
-            }
+        for tweet in &alerts {
+            let _ = app.emit(
+                "alert",
+                json!({
+                    "tweet": tweet,
+                    "detection": {
+                        "isReset": true,
+                        "score": tweet["resetScore"],
+                        "signals": tweet["resetSignals"],
+                    }
+                }),
+            );
         }
         let pending = {
             let store = state.store.lock().unwrap();

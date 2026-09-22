@@ -1103,23 +1103,38 @@ function connectEvents() {
         (!state.q || t.text.toLowerCase().includes(state.q.toLowerCase()));
       const oldestVisible = state.tweets[state.tweets.length - 1]?.createdTs ?? 0;
       const listFull = state.tweets.length >= state.pageSize;
-      let added = 0;
+      let changed = false;
+      let alertsChanged = false;
       for (const tweet of tweets) {
+        const index = state.tweets.findIndex((item) => item.id === tweet.id);
+        if (index >= 0) {
+          const previous = state.tweets[index];
+          if (matches(tweet)) {
+            state.tweets[index] = { ...previous, ...tweet };
+          } else {
+            state.tweets.splice(index, 1);
+            state.tweetsTotal = Math.max(0, state.tweetsTotal - 1);
+          }
+          alertsChanged ||= previous.isReset !== tweet.isReset;
+          changed = true;
+          continue;
+        }
         if (state.tweetIds.has(tweet.id)) continue;
         state.tweetIds.add(tweet.id);
         state.tweetsTotal += 1;
         if (!matches(tweet)) continue;
         if (listFull && tweet.createdTs < oldestVisible) continue;
         state.tweets.push(tweet);
-        added += 1;
+        changed = true;
       }
-      if (added) {
+      if (changed) {
         // 实时插入的推文按发布时间排序，避免历史补录把老推文顶到最前
         state.tweets.sort((a, b) => b.createdTs - a.createdTs);
         renderFeed();
       } else {
         $('#feedCount').textContent = `${state.tweets.length} / ${state.tweetsTotal}`;
       }
+      if (alertsChanged) loadAlerts();
     },
     alert: ({ tweet }) => {
       showToast({

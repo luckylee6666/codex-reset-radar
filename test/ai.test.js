@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { parseVerdict, extractHttpContent, buildPrompt } from '../src/ai.js';
 
 test('parseVerdict: 提取 JSON 并校验字段', () => {
@@ -36,4 +37,12 @@ test('buildPrompt: 包含判定标准与推文', () => {
   const prompt = buildPrompt('Reset all propagated. Sweet dreams.');
   assert.ok(prompt.includes('Reset all propagated'));
   assert.ok(prompt.includes('is_reset'));
+});
+
+test('Node 与桌面端使用相同的 AI 判定提示词', () => {
+  const rust = fs.readFileSync(new URL('../desktop/src-tauri/src/ai.rs', import.meta.url), 'utf8');
+  const template = rust.match(/pub fn build_prompt\(text: &str\)[\s\S]*?r#"([\s\S]*?)"#/)[1];
+  const text = 'A reset is coming tomorrow.';
+  const rendered = template.replaceAll('{{', '{').replaceAll('}}', '}').replace('{text}', text);
+  assert.equal(buildPrompt(text), rendered);
 });

@@ -374,6 +374,7 @@ export class Poller extends EventEmitter {
 
     let judged = 0;
     const changed = [];
+    const alerts = [];
     for (const tweet of candidates) {
       const verdict = await judgeTweet(combinedText(tweet), {
         engine: this.#config.aiEngine || 'auto',
@@ -391,18 +392,19 @@ export class Poller extends EventEmitter {
       this.#store.setAiVerdict(tweet.id, verdict);
       judged += 1;
       const updated = this.#store.getTweet(tweet.id);
-      if (updated && updated.isReset !== tweet.isReset) changed.push(updated);
+      if (updated) {
+        changed.push(updated);
+        if (updated.isReset && !tweet.isReset) alerts.push(updated);
+      }
     }
 
     if (changed.length) {
       this.emit('tweets', changed);
-      for (const tweet of changed) {
-        if (tweet.isReset) {
-          this.emit('alert', {
-            tweet,
-            detection: { isReset: true, score: tweet.resetScore, signals: tweet.resetSignals },
-          });
-        }
+      for (const tweet of alerts) {
+        this.emit('alert', {
+          tweet,
+          detection: { isReset: true, score: tweet.resetScore, signals: tweet.resetSignals },
+        });
       }
       await this.notifyPendingFresh();
     }

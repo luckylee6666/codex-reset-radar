@@ -103,16 +103,19 @@ export async function listAvailableEngines(options = {}) {
 /* ── 判定提示词 ───────────────────────────────────────── */
 
 export function buildPrompt(text) {
-  return `你是 Codex 用量监控的判定器。判断下面这条推文是否在宣布「用量限额被重置」——即用户看到后应当立刻去使用额度。
+  return `你是 Codex 用量监控的判定器。判断下面这条来自受监控账号的推文是否在主动宣布或明确预告一次用量限额重置。重置预告也需要提醒，不要求额度已经到账。
 
 判定 true：
 - 明确表示刚刚 / 正在 / 即将重置用量限额（含 "reseting" 等拼写错误）
+- 主动承诺或预告某个时间会发放重置（如 "I promised a reset for Tuesday"、"We will reset everyone's limits tomorrow"），即使尚未执行也判 true
 - 额度被补充、发放、存入（banked reset / refill）
 - 以公告口吻宣布 reset（如 "All reset for everyone"）
+- 受监控账号在公告中只写 reset、未重复写 Codex / limits，不因此判 false；仍需排除下列无关语境
 
 判定 false：
 - 重置完成后的状态确认（如 "Reset all propagated"、"reset rolled out"）
-- 只是说明何时会重置（"limits reset in 2 hours"）
+- 仅解释用户已有额度的自动恢复时间或常规周期（"Your limits will reset at 3pm"、"limits reset every 5 hours"），没有主动安排一次重置
+- 只回顾过去的承诺、猜测或询问是否重置，或明确取消 / 否定重置，不构成当前预告
 - 玩笑、调侃、非限额语境（"I feel Theo is in need of a reset"）
 - 技术重置（git reset、重置密码 / 配置 / 设备）
 - 仅提到 reset 一词但没有重置公告含义
@@ -121,8 +124,13 @@ export function buildPrompt(text) {
 - "Reset all propagated. Sweet dreams." → false（完成确认）
 - "Hi Astra users. A reset and a quick update on quality issues." → true
 - "We have reset everyone's limits for gpt-5-codex." → true
+- "Ladies and gentlemen... start... your... ENGINES. We are almost Tuesday and I promised a reset for Tuesday. Among some other things. See you soon." → true（明确重置预告，尚未发放）
+- "We will reset everyone's limits tomorrow." → true（主动安排重置）
 - "Your limits will reset at 3pm." → false
+- "I promised a reset for Tuesday, but it has been cancelled." → false
 - "git reset --hard" → false
+
+如果是尚未执行的明确预告，reason 必须说明「重置预告，尚未发放」，不要声称额度已经到账。
 
 推文：
 """
